@@ -1,26 +1,32 @@
 import socket
 
 
-def main():
-    server_address = ("insecure.stevetarzia.com", 80)
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+def communicate_with_server(host: str, port: str, request: str) -> str:
+    # socket.AF_INET specifies we're using IPv4
+    # socket.SOCK_STREAM means we're using TCP => can reassemble data in order and retransmit if needed
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.connect((host, port))
+        s.sendall(request.encode())
 
-    try:
-        sock.connect(server_address)
-        request = "GET / HTTP/1.1\r\nHost: insecure.stevetarzia.com\r\nConnection: close\r\n\r\n"
-
-        sock.sendall(request.encode())
         response = b""
         while True:
-            data = sock.recv(4096)
+            data = s.recv(4096)
             if not data:
                 break
             response += data
 
-        print(response.decode())
+        return response.decode()
 
-    finally:
-        sock.close()
+
+def main():
+    HOST = "insecure.stevetarzia.com"  # server's hostname or IP
+    PORT = 80  # port used by the server
+    request = (
+        "GET / HTTP/1.1\r\nHost: insecure.stevetarzia.com\r\nConnection: close\r\n\r\n"
+    )
+
+    res = communicate_with_server(HOST, PORT, request)
+    print(res)
 
 
 if __name__ == "__main__":
