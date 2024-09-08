@@ -1,12 +1,17 @@
 import socket
+import sys
 from typing import Tuple
 
 
 def parse_url(url: str) -> Tuple[str, str]:
     url = url.split("://")[-1]  # remove the scheme
-    host, path = url.split("/", 1)  # split only on the first '/'
 
-    return host, "/" + path
+    # split only on the first '/'
+    parts = url.split("/", 1)
+    host = parts[0]
+    path = "/" + parts[1] if len(parts) > 1 else "/"
+
+    return host, path
 
 
 def communicate_with_server(host: str, port: str, request: str) -> str:
@@ -27,13 +32,16 @@ def communicate_with_server(host: str, port: str, request: str) -> str:
 
 
 def main():
-    HOST = "insecure.stevetarzia.com"  # server's hostname or IP
-    PORT = 80  # port used by the server
-    request = (
-        "GET / HTTP/1.1\r\nHost: insecure.stevetarzia.com\r\nConnection: close\r\n\r\n"
-    )
+    if len(sys.argv) != 2:
+        print("Usage: python script.py <URL>")
+        sys.exit(1)
 
-    res = communicate_with_server(HOST, PORT, request)
+    url = sys.argv[1]
+    host, path = parse_url(url)
+    PORT = 80  # port used by the server
+    request = f"GET {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n"
+
+    res = communicate_with_server(host, PORT, request)
     print(res)
 
 
