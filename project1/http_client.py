@@ -1,4 +1,12 @@
 import socket
+from typing import Tuple
+
+
+def parse_url(url: str) -> Tuple[str, str]:
+    url = url.split("://")[-1]  # remove the scheme
+    host, path = url.split("/", 1)  # split only on the first '/'
+
+    return host, "/" + path
 
 
 def communicate_with_server(host: str, port: str, request: str) -> str:
