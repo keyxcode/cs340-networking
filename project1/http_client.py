@@ -11,7 +11,7 @@ from typing import Tuple
 #
 # [x] The client must include a "Host: ..." header. This is necessary because some web servers handle multiple domains.
 #
-# [] The program should return a Unix exit code (using sys.exit) to indicate whether the request is successful or not.
+# [x] The program should return a Unix exit code (using sys.exit) to indicate whether the request is successful or not.
 #   Return 0 on success (a "200 OK" response with valid HTML) and non-zero on failure.
 #
 # [] The client should understand and follow 301 and 302 redirects. On receiving a redirect, the client should make another request
@@ -31,11 +31,11 @@ from typing import Tuple
 # [] Check the response's content-type header. Print the body to stdout only if the content-type begins with "text/html".
 #   Otherwise, exit with a non-zero exit code.
 #
-# [] Return a non-zero exit code if the input URL does not start with "http://".
+# [x] Return a non-zero exit code if the input URL does not start with "http://".
 #
-# [] Allow request URLs to include a port number (e.g., http://portquiz.net:8080/).
+# [x] Allow request URLs to include a port number (e.g., http://portquiz.net:8080/).
 #
-# [] Do not require a slash at the end of top-level URLs. Both http://insecure.stevetarzia.com and http://insecure.stevetarzia.com/ should work.
+# [x] Do not require a slash at the end of top-level URLs. Both http://insecure.stevetarzia.com and http://insecure.stevetarzia.com/ should work.
 #
 # [] Handle large pages, such as http://insecure.stevetarzia.com/libc.html.
 #
@@ -45,15 +45,27 @@ from typing import Tuple
 #   This behavior is part of the HTTP/1.0 spec and should work with servers like http://google.com.
 
 
-def parse_url(url: str) -> Tuple[str, str]:
-    url = url.split("://")[-1]  # remove the scheme
+def parse_url(url: str) -> Tuple[str, int, str]:
+    if not url.startswith("http://"):
+        raise Exception("URL must start with 'http://'")
 
-    # split only on the first '/'
-    parts = url.split("/", 1)
-    host = parts[0]
-    path = "/" + parts[1] if len(parts) > 1 else "/"
+    # remove http://
+    url = url.split("://")[-1]
 
-    return host, path
+    # split the url in (host:port) and path
+    if "/" in url:
+        host_port, path = url.split("/", 1)
+    else:
+        host_port, path = url, "/"
+
+    # split (host:port) into host and port
+    # note that host can either be a domain name or an IP address
+    if ":" in host_port:
+        host, port = host_port.split(":", 1)
+    else:
+        host, port = host_port, 80
+
+    return host, int(port), path
 
 
 def communicate_with_server(host: str, port: str, request: str) -> str:
@@ -79,12 +91,16 @@ def main():
         sys.exit(1)
 
     url = sys.argv[1]
-    host, path = parse_url(url)
-    PORT = 80  # port used by the server
-    request = f"GET {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n"
 
-    res = communicate_with_server(host, PORT, request)
-    print(res)
+    try:
+        host, port, path = parse_url(url)
+    except:
+        sys.exit(1)
+
+    request = f"GET {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n"
+    response = communicate_with_server(host, port, request)
+    print(response)
+    sys.exit(0)
 
 
 if __name__ == "__main__":
