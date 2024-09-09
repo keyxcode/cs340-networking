@@ -4,7 +4,7 @@ from typing import Tuple
 
 # Requirements:
 #
-# [] Only the body of the response (excluding the header) should be printed to stdout.
+# [x] Only the body of the response (excluding the header) should be printed to stdout.
 #   Any other messages should be printed to stderr.
 #
 # [x] All requests are assumed to use the HTTP "GET" method (no support for POST or others).
@@ -25,7 +25,7 @@ from typing import Tuple
 #
 # [] If you try to visit or are redirected to an HTTPS page, print an error message to stderr and return a non-zero exit code.
 #
-# [] If the HTTP response code is >= 400, return a non-zero exit code but print the response body to stdout if any.
+# [x] If the HTTP response code is >= 400, return a non-zero exit code but print the response body to stdout if any.
 #   Example of a 404 response: http://cs.northwestern.edu/340
 #
 # [] Check the response's content-type header. Print the body to stdout only if the content-type begins with "text/html".
@@ -37,7 +37,7 @@ from typing import Tuple
 #
 # [x] Do not require a slash at the end of top-level URLs. Both http://insecure.stevetarzia.com and http://insecure.stevetarzia.com/ should work.
 #
-# [] Handle large pages, such as http://insecure.stevetarzia.com/libc.html.
+# [x] Handle large pages, such as http://insecure.stevetarzia.com/libc.html.
 #
 # [] The client should run quickly and not use timeouts to determine when the response is fully transferred.
 #
@@ -55,6 +55,7 @@ def parse_url(url: str) -> Tuple[str, int, str]:
     # split the url in (host:port) and path
     if "/" in url:
         host_port, path = url.split("/", 1)
+        path = "/" + path
     else:
         host_port, path = url, "/"
 
@@ -68,7 +69,7 @@ def parse_url(url: str) -> Tuple[str, int, str]:
     return host, int(port), path
 
 
-def communicate_with_server(host: str, port: str, request: str) -> str:
+def communicate_with_server(host: str, port: int, request: str) -> Tuple[int, str]:
     # socket.AF_INET specifies we're using IPv4
     # socket.SOCK_STREAM means we're using TCP => can reassemble data in order and retransmit if needed
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -82,7 +83,11 @@ def communicate_with_server(host: str, port: str, request: str) -> str:
                 break
             response += data
 
-        return response.decode()
+    headers, _, body = response.decode().partition("\r\n\r\n")
+    status_line = headers.splitlines()[0]  # always first line of the headers
+    status_code = int(status_line.split()[1])  # always second el of the status line
+
+    return status_code, body
 
 
 def main():
@@ -98,9 +103,13 @@ def main():
         sys.exit(1)
 
     request = f"GET {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n"
-    response = communicate_with_server(host, port, request)
-    print(response)
-    sys.exit(0)
+    status_code, body = communicate_with_server(host, port, request)
+
+    print(body)
+    if status_code < 400:
+        sys.exit(0)
+    else:
+        sys.exit(1)
 
 
 if __name__ == "__main__":
