@@ -45,6 +45,10 @@ from typing import Tuple
 
 
 def parse_url(url: str) -> Tuple[str, int, str]:
+    """
+    Parse the URL and return the host, port, and path.
+    """
+
     if not url.startswith("http://"):
         raise ValueError("URL must start with 'http://'")
 
@@ -69,6 +73,10 @@ def parse_url(url: str) -> Tuple[str, int, str]:
 
 
 def get_from_server(host: str, port: int, path: str) -> str:
+    """
+    Send an HTTP GET request to the server and return the response.
+    """
+
     request = f"GET {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n"
 
     # socket.AF_INET specifies we're using IPv4
@@ -88,6 +96,11 @@ def get_from_server(host: str, port: int, path: str) -> str:
 
 
 def process_response(response: str) -> Tuple[int, str, str, str]:
+    """
+    Process the HTTP response and extract the status code, redirect URL,
+    content type, and body.
+    """
+
     # \r\n\r\n indicates the end of the headers
     headers, _, body = response.partition("\r\n\r\n")
 
@@ -107,6 +120,10 @@ def process_response(response: str) -> Tuple[int, str, str, str]:
 
 
 def handle_redirect(redirect_url: str) -> Tuple[int, str, str]:
+    """
+    Handle HTTP redirects and return the final status code, content type, and body.
+    """
+
     count = 0
     status_code = 301  # dummy starting point, could have chosen 302
     while count < 10 and status_code in (301, 302):
@@ -128,6 +145,7 @@ def handle_redirect(redirect_url: str) -> Tuple[int, str, str]:
 
 
 def main():
+    # get user input url
     if len(sys.argv) != 2:
         print("Usage: python script.py <URL>", file=sys.stderr)
         sys.exit(1)
