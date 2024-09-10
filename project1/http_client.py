@@ -106,6 +106,27 @@ def process_response(response: str) -> Tuple[int, str, str, str]:
     return status_code, redirect_url, content_type, body
 
 
+def redirect(redirect_url: str) -> Tuple[int, str, str]:
+    count = 0
+    status_code = 301  # dummy starting point, could have chosen 302
+    while count < 10 and status_code in (301, 302):
+        print(f"Redirected to: {redirect_url}", file=sys.stderr)
+        try:
+            host, port, path = parse_url(redirect_url)
+        except:
+            sys.exit(1)
+
+        response = get_from_server(host, port, path)
+        status_code, redirect_url, content_type, body = process_response(response)
+
+        count += 1
+
+    if count == 10:
+        raise Exception("Redirected more than 10 times")
+
+    return status_code, content_type, body
+
+
 def main():
     if len(sys.argv) != 2:
         print("Usage: python script.py <URL>")
@@ -122,22 +143,13 @@ def main():
     response = get_from_server(host, port, path)
     status_code, redirect_url, content_type, body = process_response(response)
 
-    # redirect loop in case of 301 or 302
-    redirect_count = 0
-    while redirect_count < 10 and (status_code == 301 or status_code == 302):
-        print(f"Redirected to: {redirect_url}", file=sys.stderr)
+    # redirect
+    if status_code == 301 or status_code == 302:
         try:
-            host, port, path = parse_url(redirect_url)
-        except:
+            status_code, content_type, body = redirect(redirect_url)
+        except Exception as e:
+            print(e)
             sys.exit(1)
-
-        response = get_from_server(host, port, path)
-        status_code, redirect_url, content_type, body = process_response(response)
-
-        redirect_count += 1
-
-    if redirect_count == 10:
-        sys.exit(1)
 
     # type check
     if not content_type.startswith("text/html"):
