@@ -46,7 +46,7 @@ from typing import Tuple
 
 def parse_url(url: str) -> Tuple[str, int, str]:
     if not url.startswith("http://"):
-        raise Exception("URL must start with 'http://'")
+        raise ValueError("URL must start with 'http://'")
 
     # remove http://
     url = url.split("://")[-1]
@@ -106,53 +106,55 @@ def process_response(response: str) -> Tuple[int, str, str, str]:
     return status_code, redirect_url, content_type, body
 
 
-def redirect(redirect_url: str) -> Tuple[int, str, str]:
+def handle_redirect(redirect_url: str) -> Tuple[int, str, str]:
     count = 0
     status_code = 301  # dummy starting point, could have chosen 302
     while count < 10 and status_code in (301, 302):
         print(f"Redirected to: {redirect_url}", file=sys.stderr)
         try:
             host, port, path = parse_url(redirect_url)
-        except:
-            sys.exit(1)
+        except ValueError:
+            raise
 
         response = get_from_server(host, port, path)
         status_code, redirect_url, content_type, body = process_response(response)
-
         count += 1
 
     if count == 10:
-        raise Exception("Redirected more than 10 times")
+        print("Redirected more than 10 times", file=sys.stderr)
+        sys.exit(1)
 
     return status_code, content_type, body
 
 
 def main():
     if len(sys.argv) != 2:
-        print("Usage: python script.py <URL>")
+        print("Usage: python script.py <URL>", file=sys.stderr)
         sys.exit(1)
 
     # parse user input url
     url = sys.argv[1]
     try:
         host, port, path = parse_url(url)
-    except:
+    except Exception as e:
+        print(e, file=sys.stderr)
         sys.exit(1)
 
-    # make initial get request form user url
+    # make initial get request from user url
     response = get_from_server(host, port, path)
     status_code, redirect_url, content_type, body = process_response(response)
 
-    # redirect
-    if status_code == 301 or status_code == 302:
+    # handle redirect
+    if status_code in (301, 302):
         try:
-            status_code, content_type, body = redirect(redirect_url)
-        except Exception as e:
-            print(e)
+            status_code, content_type, body = handle_redirect(redirect_url)
+        except ValueError as e:
+            print(e, file=sys.stderr)
             sys.exit(1)
 
     # type check
     if not content_type.startswith("text/html"):
+        print('Content-Type does not start with "text/html"', file=sys.stderr)
         sys.exit(1)
 
     # print response
@@ -160,6 +162,7 @@ def main():
     if status_code < 400:
         sys.exit(0)
     else:
+        print(status_code, file=sys.stderr)
         sys.exit(1)
 
 
