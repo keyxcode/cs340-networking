@@ -17,13 +17,24 @@ from typing import Tuple
 
 
 def run_server(port: int) -> None:
-    print(port)
+    HOST = "localhost"
 
-    # packet/address family AF_INET for IPv4
-    # type SOCK_STREAM for TCP
-
-    # bind to an empty string "" as the IP so that the socket listens on all network interfaces available on the machine
+    # packet family AF_INET for IPv4 & type SOCK_STREAM for TCP
+    # use an empty string "" as the IP so that the socket listens on all network interfaces available on the machine
     # and use the port passed in arg
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind((HOST, port))
+        s.listen()
+        conn, addr = s.accept()
+
+        with conn:
+            print(f"Connected by {addr}")
+
+            # while True: # echo
+            #     data = conn.recv(1024)
+            #     if not data:
+            #         break
+            #     conn.sendall(data)
 
     # check for file availability
 
