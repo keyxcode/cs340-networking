@@ -1,14 +1,13 @@
 import socket
 import sys
-from typing import Tuple
 
-# [] Create a TCP socket to listen for new connections.
-# [] Bind the socket to the port provided on the command line.
-# [] Listen on the accept socket. (Consider the effects of backlog size on performance)
+# [x] Create a TCP socket to listen for new connections.
+# [x] Bind the socket to the port provided on the command line.
+# [x] Listen on the accept socket. (Consider the effects of backlog size on performance)
 #
 # Do the following repeatedly:
 #
-# [] a. Accept a new connection on the accept socket.
+# [x] a. Accept a new connection on the accept socket.
 # [] b. Read and parse the HTTP request from the connection socket. Determine how many bytes to read based on Content-Length header?
 # [] c. Check if the requested file exists and ends with ".htm" or ".html".
 # [] d. If the file exists, use status code 200 OK to write the HTTP header to the connection socket. Then open and write the file content (HTTP body) to the socket.
@@ -20,11 +19,18 @@ def run_server(port: int) -> None:
     HOST = "localhost"
 
     # packet family AF_INET for IPv4 & type SOCK_STREAM for TCP
-    # use an empty string "" as the IP so that the socket listens on all network interfaces available on the machine
-    # and use the port passed in arg
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        # use an empty string "" as the IP so that the socket listens on all network interfaces available on the machine
+        # or use "localhost" for testing locally
+        # and use the port passed in arg
         s.bind((HOST, port))
-        s.listen()
+
+        # listen() enables a server to accept connections
+        # instructs the OS to start queuing up to 10 incoming connections while server is busy
+        s.listen(10)
+
+        # accept() pauses the program's execution until a connection request is received
+        # once a connection is received, it will return a new connection socket, and the IP addr of the request
         conn, addr = s.accept()
 
         with conn:
@@ -39,8 +45,6 @@ def run_server(port: int) -> None:
     # check for file availability
 
     # create and send response
-
-    # close socket
 
 
 def main():
