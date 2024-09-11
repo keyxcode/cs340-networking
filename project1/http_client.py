@@ -80,8 +80,7 @@ def make_get_request(host: str, port: int, path: str) -> str:
     """
 
     request = f"GET {path} HTTP/1.0\r\nHost: {host}\r\n\r\n"
-    print_err("Request Headers:")
-    print_err(request)
+    print_err(f"Request Headers:\n{request}")
     print_br()
 
     # socket.AF_INET specifies we're using IPv4
@@ -104,8 +103,7 @@ def process_response(response: str) -> Tuple[int, str, str, str]:
 
     # \r\n\r\n indicates the end of the headers
     headers, _, body = response.partition("\r\n\r\n")
-    print_err("Response Headers:")
-    print_err(headers)
+    print_err(f"Response Headers:\n{headers}")
     print_br()
 
     status_line = headers.splitlines()[0]  # always first line of the headers
