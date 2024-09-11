@@ -1,5 +1,6 @@
 from socket import socket, AF_INET, SOCK_STREAM, SHUT_WR
 import sys
+from socket_utils import receive_all
 from utils import print_err, print_br
 from typing import Tuple
 
@@ -90,20 +91,7 @@ def make_get_request(host: str, port: int, path: str) -> str:
         s.sendall(request.encode())
         s.shutdown(SHUT_WR)
 
-        packets = list()
-        count = 0
-        print_err("Receiving data...")
-        while True:
-            packet = s.recv(4096)
-            if not packet:
-                break
-            print_err((f"[Packet {count}]: {len(packet)} bytes"))
-            packets.append(packet)
-            count += 1
-
-    response = b"".join(packets)
-    print_err(f"Received {len(response)} bytes")
-    print_br()
+        response = receive_all(s)
 
     return response.decode()
 
