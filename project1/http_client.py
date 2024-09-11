@@ -1,4 +1,4 @@
-import socket
+from socket import socket, AF_INET, SOCK_STREAM, SHUT_WR
 import sys
 from typing import Tuple
 
@@ -72,18 +72,19 @@ def parse_url(url: str) -> Tuple[str, int, str]:
     return host, int(port), path
 
 
-def get_from_server(host: str, port: int, path: str) -> str:
+def make_get_request(host: str, port: int, path: str) -> str:
     """
     Send an HTTP GET request to the server and return the response.
     """
 
-    request = f"GET {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n"
+    request = f"GET {path} HTTP/1.0\r\nHost: {host}\r\n\r\n"
 
     # socket.AF_INET specifies we're using IPv4
     # socket.SOCK_STREAM means we're using TCP => can reassemble data in order and retransmit if needed
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+    with socket(AF_INET, SOCK_STREAM) as s:
         s.connect((host, port))
         s.sendall(request.encode())
+        s.shutdown(SHUT_WR)
 
         response = b""
         while True:
@@ -133,7 +134,7 @@ def handle_redirect(redirect_url: str) -> Tuple[int, str, str]:
         except ValueError:
             raise
 
-        response = get_from_server(host, port, path)
+        response = make_get_request(host, port, path)
         status_code, redirect_url, content_type, body = process_response(response)
         count += 1
 
@@ -159,7 +160,7 @@ def main():
         sys.exit(1)
 
     # make initial get request from user url
-    response = get_from_server(host, port, path)
+    response = make_get_request(host, port, path)
     status_code, redirect_url, content_type, body = process_response(response)
 
     # handle redirect
