@@ -1,5 +1,6 @@
 from socket import socket, AF_INET, SOCK_STREAM, SHUT_WR
 import sys
+from utils import print_err, print_br
 from typing import Tuple
 
 
@@ -78,6 +79,9 @@ def make_get_request(host: str, port: int, path: str) -> str:
     """
 
     request = f"GET {path} HTTP/1.0\r\nHost: {host}\r\n\r\n"
+    print_err("Request Headers:")
+    print_err(request)
+    print_br()
 
     # socket.AF_INET specifies we're using IPv4
     # socket.SOCK_STREAM means we're using TCP => can reassemble data in order and retransmit if needed
@@ -86,12 +90,20 @@ def make_get_request(host: str, port: int, path: str) -> str:
         s.sendall(request.encode())
         s.shutdown(SHUT_WR)
 
-        response = b""
+        packets = list()
+        count = 0
+        print_err("Receiving data...")
         while True:
-            data = s.recv(4096)
-            if not data:
+            packet = s.recv(4096)
+            if not packet:
                 break
-            response += data
+            print_err((f"[Packet {count}]: {len(packet)} bytes"))
+            packets.append(packet)
+            count += 1
+
+    response = b"".join(packets)
+    print_err(f"Received {len(response)} bytes")
+    print_br()
 
     return response.decode()
 
@@ -104,6 +116,9 @@ def process_response(response: str) -> Tuple[int, str, str, str]:
 
     # \r\n\r\n indicates the end of the headers
     headers, _, body = response.partition("\r\n\r\n")
+    print_err("Response Headers:")
+    print_err(headers)
+    print_br()
 
     status_line = headers.splitlines()[0]  # always first line of the headers
     status_code = int(status_line.split()[1])  # e.g. HTTP/1.1 200 OK
@@ -128,7 +143,8 @@ def handle_redirect(redirect_url: str) -> Tuple[int, str, str]:
     count = 0
     status_code = 301  # dummy starting point, could have chosen 302
     while count < 10 and status_code in (301, 302):
-        print(f"Redirected to: {redirect_url}", file=sys.stderr)
+        print_err(f"Redirected to: {redirect_url}")
+        print_br()
         try:
             host, port, path = parse_url(redirect_url)
         except ValueError:
@@ -139,7 +155,7 @@ def handle_redirect(redirect_url: str) -> Tuple[int, str, str]:
         count += 1
 
     if count == 10:
-        print("Redirected more than 10 times", file=sys.stderr)
+        print_err("Redirected more than 10 times")
         sys.exit(1)
 
     return status_code, content_type, body
@@ -148,7 +164,7 @@ def handle_redirect(redirect_url: str) -> Tuple[int, str, str]:
 def main():
     # get user input url
     if len(sys.argv) != 2:
-        print("Usage: python script.py <URL>", file=sys.stderr)
+        print_err("Usage: python script.py <URL>")
         sys.exit(1)
 
     # parse user input url
@@ -156,7 +172,7 @@ def main():
     try:
         host, port, path = parse_url(url)
     except Exception as e:
-        print(e, file=sys.stderr)
+        print_err(e)
         sys.exit(1)
 
     # make initial get request from user url
@@ -168,20 +184,19 @@ def main():
         try:
             status_code, content_type, body = handle_redirect(redirect_url)
         except ValueError as e:
-            print(e, file=sys.stderr)
+            print_err(e)
             sys.exit(1)
 
     # type check
     if not content_type.startswith("text/html"):
-        print('Content-Type does not start with "text/html"', file=sys.stderr)
+        print_err('Content-Type does not start with "text/html"')
         sys.exit(1)
 
-    # print response
+    # print response body
     print(body)
     if status_code < 400:
         sys.exit(0)
     else:
-        print(status_code, file=sys.stderr)
         sys.exit(1)
 
 
