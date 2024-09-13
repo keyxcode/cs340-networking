@@ -180,6 +180,7 @@ def main():
 
     # print response body
     print(body)
+    print_br()
     if status_code < 400:
         sys.exit(0)
     else:

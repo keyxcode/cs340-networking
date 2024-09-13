@@ -12,10 +12,10 @@ from utils import print_err, print_br
 #
 # [x] a. Accept a new connection on the accept socket.
 # [x] b. Read and parse the HTTP request from the connection socket. Determine how many bytes to read.
-# [] c. Check if the requested file exists and ends with ".htm" or ".html".
-# [] d. If the file exists, use status code 200 OK to write the HTTP header to the connection socket. Then open and write the file content (HTTP body) to the socket.
-# [] e. If the file doesn't exist, send a 404 Not Found response. If the file exists but does not end with ".htm" or ".html", send a 403 Forbidden response.
-# [] f. Close the connection socket.
+# [x] c. Check if the requested file exists and ends with ".htm" or ".html".
+# [x] d. If the file exists, use status code 200 OK to write the HTTP header to the connection socket. Then open and write the file content (HTTP body) to the socket.
+# [x] e. If the file doesn't exist, send a 404 Not Found response. If the file exists but does not end with ".htm" or ".html", send a 403 Forbidden response.
+# [x] f. Close the connection socket.
 
 
 def get_file_requested(request: bytes) -> str:
@@ -40,8 +40,20 @@ def is_html_file(filename: str) -> bool:
     return filename.rsplit(".", 1)[-1].lower() in ("html", "htm")
 
 
-def make_response(status_code: int, filename: str = None) -> bool:
-    pass
+def make_response(status_code: int, filename: str = None) -> bytes:
+    status_code_reasons = {200: "OK", 403: "Forbidden", 404: "Not Found"}
+
+    # headers
+    response = f"HTTP/1.0 {status_code} {status_code_reasons[status_code]}\r\nContent-Type: text/html\r\n\r\n"
+
+    if filename:
+        with open(filename, "r") as file:
+            response += file.read()
+
+    print_err(f"Response Headers:\n{response}")
+    print_br()
+
+    return response.encode()
 
 
 def run_server(port: int) -> None:
@@ -79,10 +91,7 @@ def run_server(port: int) -> None:
             else:
                 response = make_response(404)
 
-            # dummy hardcoded
             conn.sendall(response)
-            print_err(f"Response Headers:\n{response.decode()}")
-            print_br()
 
 
 def main():
