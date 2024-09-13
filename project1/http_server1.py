@@ -19,6 +19,8 @@ from utils import print_err, print_br
 
 
 def get_file_requested(request: bytes) -> str:
+    """Extract the requested file name from an HTTP GET request."""
+
     # technically, there should be a step separating the request headers and body
     # but since we're only supporting GET requests here, this is not important as they only contain headers
     headers = request.decode()
@@ -33,14 +35,20 @@ def get_file_requested(request: bytes) -> str:
 
 
 def file_exists(filename: str) -> bool:
+    """Check if a file exists on the server."""
+
     return isfile(filename)
 
 
 def is_html_file(filename: str) -> bool:
+    """Determine if the file is an HTML or HTM file."""
+
     return filename.rsplit(".", 1)[-1].lower() in ("html", "htm")
 
 
 def make_response(status_code: int, filename: str = None) -> bytes:
+    """Generate an HTTP response with the given status code and optional file content."""
+
     status_code_reasons = {200: "OK", 403: "Forbidden", 404: "Not Found"}
 
     # headers
@@ -57,6 +65,8 @@ def make_response(status_code: int, filename: str = None) -> bytes:
 
 
 def run_server(port: int) -> None:
+    """Start the HTTP server and handle a single incoming connection at a time."""
+
     # use an empty string "" as the IP so that the socket listens on all network interfaces available on the machine
     # or use "localhost" for only testing locally
     HOST = "localhost"
@@ -77,7 +87,7 @@ def run_server(port: int) -> None:
         print_br()
 
         with conn:
-            request = receive_all(conn)
+            request = receive_all(conn, True)
 
             # parse request
             file_requested = get_file_requested(request)
