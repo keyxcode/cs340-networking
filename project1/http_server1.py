@@ -1,6 +1,6 @@
 from socket import socket, AF_INET, SOCK_STREAM
 import sys
-from os.path import basename
+from os.path import basename, isfile
 from socket_utils import receive_all
 from utils import print_err, print_br
 
@@ -33,7 +33,7 @@ def get_file_requested(request: bytes) -> str:
 
 
 def file_exists(filename: str) -> bool:
-    pass
+    return isfile(filename)
 
 
 def is_html_file(filename: str) -> bool:
