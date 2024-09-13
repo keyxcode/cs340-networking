@@ -13,12 +13,12 @@ def receive_all(s: socket) -> bytes:
     print_err("Receiving data...")
     while True:
         packet = s.recv(4096)
-        if not packet:
-            break
-
-        print_err((f"[Packet {count}]: {len(packet)} bytes"))
         packets.append(packet)
+        print_err((f"[Packet {count}]: {len(packet)} bytes"))
         count += 1
+
+        if b"\r\n\r\n" in packet:
+            break
 
     response = b"".join(packets)
     print_err(f"Received {len(response)} bytes")
