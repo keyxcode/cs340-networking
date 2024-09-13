@@ -1,5 +1,6 @@
 from socket import socket, AF_INET, SOCK_STREAM
 import sys
+from os.path import basename
 from socket_utils import receive_all
 from utils import print_err, print_br
 
@@ -17,8 +18,18 @@ from utils import print_err, print_br
 # [] f. Close the connection socket.
 
 
-def get_file_requested(request: str) -> str:
-    pass
+def get_file_requested(request: bytes) -> str:
+    # technically, there should be a step separating the request headers and body
+    # but since we're only supporting GET requests here, this is not important as they only contain headers
+    headers = request.decode()
+    print_err(f"Request Headers:\n{headers}")
+    print_br()
+
+    request_line = headers.splitlines()[0]  # always first line of the headers
+    path = request_line.split()[1]  # e.g. GET /index.html HTTP/1.1
+    filename = basename(path)
+
+    return filename
 
 
 def file_exists(filename: str) -> bool:
@@ -55,11 +66,9 @@ def run_server(port: int) -> None:
 
         with conn:
             request = receive_all(conn)
-            print_err(f"Request Headers:\n{request.decode()}")
-            print_br()
 
             # parse request
-            file_requested = get_file_requested(request.decode())
+            file_requested = get_file_requested(request)
 
             # creat response based on file availability
             if file_exists(file_requested):
