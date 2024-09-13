@@ -80,28 +80,33 @@ def run_server(port: int) -> None:
         print_err(f"Server socket {s} is listening")
         print_br()
 
-        # accept() pauses the program's execution until a connection request is received
-        # once a connection is received, it will return a new connection socket, and the IP addr of the request
-        conn, addr = s.accept()
-        print_err(f"Received connection from {addr}\nOpened connection socket {conn}")
-        print_br()
+        # continuously listen to new connection requests
+        while True:
+            print_err("Listening...")
+            # accept() pauses the program's execution until a connection request is received
+            # once a connection is received, it will return a new connection socket, and the IP addr of the request
+            conn, addr = s.accept()
+            print_err(
+                f"Received connection from {addr}\nOpened connection socket {conn}"
+            )
+            print_br()
 
-        with conn:
-            request = receive_all(conn, True)
+            with conn:
+                request = receive_all(conn, True)
 
-            # parse request
-            file_requested = get_file_requested(request)
+                # parse request
+                file_requested = get_file_requested(request)
 
-            # creat response based on file availability
-            if file_exists(file_requested):
-                if is_html_file(file_requested):
-                    response = make_response(200, file_requested)
+                # creat response based on file availability
+                if file_exists(file_requested):
+                    if is_html_file(file_requested):
+                        response = make_response(200, file_requested)
+                    else:
+                        response = make_response(403)
                 else:
-                    response = make_response(403)
-            else:
-                response = make_response(404)
+                    response = make_response(404)
 
-            conn.sendall(response)
+                conn.sendall(response)
 
 
 def main():
