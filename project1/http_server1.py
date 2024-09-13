@@ -37,7 +37,7 @@ def file_exists(filename: str) -> bool:
 
 
 def is_html_file(filename: str) -> bool:
-    pass
+    return filename.rsplit(".", 1)[-1].lower() in ("html", "htm")
 
 
 def make_response(status_code: int, filename: str = None) -> bool:
