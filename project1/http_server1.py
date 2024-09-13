@@ -10,11 +10,27 @@ from utils import print_err, print_br
 # Do the following repeatedly:
 #
 # [x] a. Accept a new connection on the accept socket.
-# [x    ] b. Read and parse the HTTP request from the connection socket. Determine how many bytes to read.
+# [x] b. Read and parse the HTTP request from the connection socket. Determine how many bytes to read.
 # [] c. Check if the requested file exists and ends with ".htm" or ".html".
 # [] d. If the file exists, use status code 200 OK to write the HTTP header to the connection socket. Then open and write the file content (HTTP body) to the socket.
 # [] e. If the file doesn't exist, send a 404 Not Found response. If the file exists but does not end with ".htm" or ".html", send a 403 Forbidden response.
 # [] f. Close the connection socket.
+
+
+def get_file_requested(request: str) -> str:
+    pass
+
+
+def file_exists(filename: str) -> bool:
+    pass
+
+
+def is_html_file(filename: str) -> bool:
+    pass
+
+
+def make_response(status_code: int, filename: str = None) -> bool:
+    pass
 
 
 def run_server(port: int) -> None:
@@ -42,15 +58,22 @@ def run_server(port: int) -> None:
             print_err(f"Request Headers:\n{request.decode()}")
             print_br()
 
+            # parse request
+            file_requested = get_file_requested(request.decode())
+
+            # creat response based on file availability
+            if file_exists(file_requested):
+                if is_html_file(file_requested):
+                    response = make_response(200, file_requested)
+                else:
+                    response = make_response(403)
+            else:
+                response = make_response(404)
+
             # dummy hardcoded
-            response = b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"
             conn.sendall(response)
             print_err(f"Response Headers:\n{response.decode()}")
             print_br()
-
-    # check for file availability
-
-    # create and send response
 
 
 def main():
