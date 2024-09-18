@@ -19,7 +19,7 @@ from http_server1 import get_file_requested, file_exists, is_html_file, make_res
 # [x]    i. If it is the accept socket, accept the new connection and add it to the list of open connections with the appropriate state
 # [x]    ii. If it is some other socket, perform steps 4.b through 4.f from the description of http_server1 in Part 2. After closing the socket, delete it from the list of open connections.
 # [x] Test your server using telnet and curl (or a web browser) as described above, to see whether it really handles two simultaneous connections.
-# [] Your server should also be robust. If a request is empty or does not start with "GET", your server should just ignore it.
+# [x] Your server should also be robust. If a request is empty or does not start with "GET", your server should just ignore it.
 
 
 def run_server(port: int) -> None:
@@ -63,18 +63,21 @@ def run_server(port: int) -> None:
                 # - file read will never block
                 # - writes will never block (meaning we can use sendall)
                 else:
-                    request = receive_all(s)
-                    file_requested = get_file_requested(request)
-                    print_err(f"Received request from socket {s}")
-                    print_br()
+                    request = receive_all(conn)
 
-                    if file_exists(file_requested):
-                        if is_html_file(file_requested):
-                            response = make_response(200, file_requested)
+                    try:
+                        file_requested = get_file_requested(request)
+                        if file_exists(file_requested):
+                            if is_html_file(file_requested):
+                                with open(file_requested, "r") as file:
+                                    response = make_response(200, file.read())
+                            else:
+                                response = make_response(403)
                         else:
-                            response = make_response(403)
-                    else:
-                        response = make_response(404)
+                            response = make_response(404)
+                    except ValueError as e:
+                        response = make_response(400, str(e))
+                        print_err(e)
 
                     s.sendall(response)
                     print_err(f"Response:\n{response.decode()}")
