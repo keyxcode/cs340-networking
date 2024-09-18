@@ -58,9 +58,6 @@ def make_response(status_code: int, filename: str = None) -> bytes:
         with open(filename, "r") as file:
             response += file.read()
 
-    print_err(f"Response Headers:\n{response}")
-    print_br()
-
     return response.encode()
 
 
@@ -107,6 +104,8 @@ def run_server(port: int) -> None:
                     response = make_response(404)
 
                 conn.sendall(response)
+                print_err(f"Response:\n{response.decode()}")
+                print_br()
 
 
 def main():

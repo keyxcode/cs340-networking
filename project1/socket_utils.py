@@ -14,7 +14,7 @@ def receive_all(s: socket) -> bytes:
 
     print_err("Receiving data...")
     while True:
-        packet = s.recv(4096)
+        packet = s.recv(1024)
         data.extend(packet)
         print_err((f"[Packet {count}]: {len(packet)} bytes - {packet}"))
         count += 1
