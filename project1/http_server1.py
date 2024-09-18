@@ -27,7 +27,15 @@ def get_file_requested(request: bytes) -> str:
     print_err(f"Request Headers:\n{headers}")
     print_br()
 
-    request_line = headers.splitlines()[0]  # always first line of the headers
+    headers_lines = headers.splitlines()
+    if not headers_lines:
+        raise ValueError("Invalid request: No headers found")
+
+    request_line = headers_lines[0]  # always first line of the headers
+    request_components = request_line.split()
+    if len(request_components) < 3 or request_components[0] != "GET":
+        raise ValueError("Invalid request method or format")
+
     path = request_line.split()[1]  # e.g. GET /index.html HTTP/1.1
     filename = basename(path)
 
@@ -49,7 +57,12 @@ def is_html_file(filename: str) -> bool:
 def make_response(status_code: int, filename: str = None) -> bytes:
     """Generate an HTTP response with the given status code and optional file content."""
 
-    status_code_reasons = {200: "OK", 403: "Forbidden", 404: "Not Found"}
+    status_code_reasons = {
+        200: "OK",
+        400: "Bad Request",
+        403: "Forbidden",
+        404: "Not Found",
+    }
 
     # headers
     response = f"HTTP/1.0 {status_code} {status_code_reasons[status_code]}\r\nContent-Type: text/html\r\n\r\n"
@@ -92,16 +105,19 @@ def run_server(port: int) -> None:
                 request = receive_all(conn)
 
                 # parse request
-                file_requested = get_file_requested(request)
-
-                # creat response based on file availability
-                if file_exists(file_requested):
-                    if is_html_file(file_requested):
-                        response = make_response(200, file_requested)
+                try:
+                    file_requested = get_file_requested(request)
+                    # create response based on file availability
+                    if file_exists(file_requested):
+                        if is_html_file(file_requested):
+                            response = make_response(200, file_requested)
+                        else:
+                            response = make_response(403)
                     else:
-                        response = make_response(403)
-                else:
-                    response = make_response(404)
+                        response = make_response(404)
+                except ValueError as e:
+                    response = make_response(400)
+                    print_err(e)
 
                 conn.sendall(response)
                 print_err(f"Response:\n{response.decode()}")
