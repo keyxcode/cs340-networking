@@ -11,18 +11,14 @@ from http_server1 import get_file_requested, file_exists, is_html_file, make_res
 # [x] Initialize the list of open connections to empty
 #
 # Do the following repeatedly:
+#
 # [x] a. Make a list of the sockets we are waiting to read from the list of open connections. We shall call this the "read list." In our case, it's simply the list of all open connections.
-#
 # [x] b. Add the accept socket to the read list. Having a new connection arrive on this socket makes it available for reading; it’s just that we use a strange kind of read, the accept call, to do the read.
-#
 # [x] c. Call select with the read list. Your program will now block until one of the sockets on the read list is ready to be read.
-#
 # [x] d. For each socket on the read list that select has marked readable, do the following:
 # [x]    i. If it is the accept socket, accept the new connection and add it to the list of open connections with the appropriate state
 # [x]    ii. If it is some other socket, perform steps 4.b through 4.f from the description of http_server1 in Part 2. After closing the socket, delete it from the list of open connections.
-#
 # [x] Test your server using telnet and curl (or a web browser) as described above, to see whether it really handles two simultaneous connections.
-#
 # [] Your server should also be robust. If a request is empty or does not start with "GET", your server should just ignore it.
 
 
@@ -42,18 +38,18 @@ def run_server(port: int) -> None:
         print_err(f"Server socket {server} is listening")
         print_br()
 
-        # sockets from which we expect to read
+        # read list of all open connections
         inputs = [server]
 
         while inputs:
-            # blocking until an input is marked by select as readable
+            # program will block until an input is marked by select as readable
             print_err("Listening...")
             readable, _, _ = select(inputs, [], [])
 
             # handle inputs
             for s in readable:
+                # if the readable socket is the accept socket (server), accept the new connection
                 if s is server:
-                    # a "readable" socket is ready to accept a connection
                     conn, addr = server.accept()
                     conn.setblocking(0)
                     inputs.append(conn)
@@ -61,13 +57,17 @@ def run_server(port: int) -> None:
                         f"Received connection from {addr}\nOpened connection socket {conn}"
                     )
                     print_br()
+                # if the readable socket is some other socket, process the request and respond similarly to in server1
+                # some assumptions to simplify things:
+                # - if we can read one byte from the socket without blocking, we can read the whole request without blocking (meaning we can use receive_all)
+                # - file read will never block
+                # - writes will never block (meaning we can use sendall)
                 else:
                     request = receive_all(s)
                     file_requested = get_file_requested(request)
                     print_err(f"Received request from socket {s}")
                     print_br()
 
-                    # create response based on file availability
                     if file_exists(file_requested):
                         if is_html_file(file_requested):
                             response = make_response(200, file_requested)
