@@ -74,10 +74,10 @@ def run_server(port: int) -> None:
     BACKLOG_SIZE = 10
 
     # packet family AF_INET for IPv4 | type SOCK_STREAM for TCP
-    with socket(AF_INET, SOCK_STREAM) as s:
-        s.bind((HOST, port))  # bind socket to host:port
-        s.listen(BACKLOG_SIZE)  # enable a server to accept connections
-        print_err(f"Server socket {s} is listening")
+    with socket(AF_INET, SOCK_STREAM) as server:
+        server.bind((HOST, port))  # bind socket to host:port
+        server.listen(BACKLOG_SIZE)  # enable a server to accept connections
+        print_err(f"Server socket {server} is listening")
         print_br()
 
         # continuously listen to new connection requests
@@ -85,14 +85,14 @@ def run_server(port: int) -> None:
             print_err("Listening...")
             # accept() pauses the program's execution until a connection request is received
             # once a connection is received, it will return a new connection socket, and the IP addr of the request
-            conn, addr = s.accept()
+            conn, addr = server.accept()
             print_err(
                 f"Received connection from {addr}\nOpened connection socket {conn}"
             )
             print_br()
 
             with conn:
-                request = receive_all(conn, True)
+                request = receive_all(conn)
 
                 # parse request
                 file_requested = get_file_requested(request)
