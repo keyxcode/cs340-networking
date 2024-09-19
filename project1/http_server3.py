@@ -1,25 +1,27 @@
 from socket import socket, AF_INET, SOCK_STREAM
 import sys
+from math import prod
+import json
 from socket_utils import receive_all
 from utils import print_err, print_br
-from http_server1 import make_response
+from http_server1 import make_http_response
 from typing import List
 
 # Implement a dynamic server that handles product calculation via HTTP requests
 #
-# [] Parse query parameters from the URL as operands
-# [] Use Python's built-in json library to generate the response in JSON format
-# [] Ensure the response body includes:
-#     - [] "operation": "product"
-#     - [] "operands": a list of the numbers provided in the query parameters
-#     - [] "result": the product of the operands
-# [] Set "Content-Type: application/json" for the response
-# [] Return a 404 Not Found status code for URLs other than "/product"
-# [] Return a 400 Bad Request status code if:
-#     - [] No parameters are provided for "/product"
-#     - [] Any parameter is not a valid number (e.g., "GET /product?a=blah")
-# [] Treat query parameters as floating point numbers
+# [x] Parse query parameters from the URL as operands
+# [x] Return a 404 Not Found status code for URLs other than "/product"
+# [x] Return a 400 Bad Request status code if:
+#     - [x] No parameters are provided for "/product"
+#     - [x] Any parameter is not a valid number (e.g., "GET /product?a=blah")
+# [x] Treat query parameters as floating point numbers
 # [] Handle floating point overflow: return "inf" or "-inf" as strings in the JSON response
+# [x] Use Python's built-in json library to generate the response in JSON format
+# [x] Ensure the response body includes:
+#     - [x] "operation": "product"
+#     - [x] "operands": a list of the numbers provided in the query parameters
+#     - [x] "result": the product of the operands
+# [] Set "Content-Type: application/json" for the response
 
 
 class NotFoundError(Exception):
@@ -37,7 +39,7 @@ def get_path(request: bytes) -> str:
     if not headers_lines:
         raise ValueError("Invalid request: No headers found")
 
-    request_line = headers_lines[0]  # always first line of the headers
+    request_line = headers_lines[0]
     request_components = request_line.split()
     if len(request_components) < 3 or request_components[0] != "GET":
         raise ValueError("Invalid request method or format")
@@ -56,6 +58,7 @@ def get_operands(path: str) -> List[float]:
     if len(path_components) < 2:
         raise ValueError(f"Missing query parameters in the request {path}")
 
+    # get a list of the query params themselves e.g. ["a=1", "b=2"]
     query_params = path_components[1].split("&")
     if len(query_params) < 1:
         raise ValueError(f"No operands provided in the query {path}")
@@ -70,8 +73,15 @@ def get_operands(path: str) -> List[float]:
     return res
 
 
-def compute_product(*a) -> int:
-    print(a)
+def make_json_response(operands: List[int]) -> int:
+    response_body = {
+        "operation": "product",
+        "operands": operands,
+        "result": prod(operands),
+    }
+    response_json = json.dumps(response_body)
+
+    return response_json
 
 
 def run_server(port: int) -> None:
@@ -100,13 +110,13 @@ def run_server(port: int) -> None:
                 try:
                     path = get_path(request)
                     operands = get_operands(path)
-                    product = compute_product(operands)
-                    response = make_response(200, str(product))
+                    json_body = make_json_response(operands)
+                    response = make_http_response(200, json_body)
                 except NotFoundError as e:
-                    response = make_response(404, str(e))
+                    response = make_http_response(404, str(e))
                     print_err(e)
                 except (ValueError, Exception) as e:
-                    response = make_response(400, str(e))
+                    response = make_http_response(400, f"{str(e)}")
                     print_err(e)
                 finally:
                     conn.sendall(response)

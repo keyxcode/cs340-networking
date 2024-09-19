@@ -3,7 +3,12 @@ import sys
 from select import select
 from socket_utils import receive_all
 from utils import print_err, print_br
-from http_server1 import get_file_requested, file_exists, is_html_file, make_response
+from http_server1 import (
+    get_file_requested,
+    file_exists,
+    is_html_file,
+    make_http_response,
+)
 
 # [x] Create a TCP socket on which to listen for new connections
 # [x] Bind that socket to the port provided on the command line
@@ -70,13 +75,13 @@ def run_server(port: int) -> None:
                         if file_exists(file_requested):
                             if is_html_file(file_requested):
                                 with open(file_requested, "r") as file:
-                                    response = make_response(200, file.read())
+                                    response = make_http_response(200, file.read())
                             else:
-                                response = make_response(403)
+                                response = make_http_response(403)
                         else:
-                            response = make_response(404)
+                            response = make_http_response(404)
                     except ValueError as e:
-                        response = make_response(400, str(e))
+                        response = make_http_response(400, str(e))
                         print_err(e)
 
                     s.sendall(response)

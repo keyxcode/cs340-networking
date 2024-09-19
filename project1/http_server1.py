@@ -54,7 +54,7 @@ def is_html_file(filename: str) -> bool:
     return filename.rsplit(".", 1)[-1].lower() in ("html", "htm")
 
 
-def make_response(status_code: int, body: str = "") -> bytes:
+def make_http_response(status_code: int, body: str = "") -> bytes:
     """Generate an HTTP response with the given status code and optional file content."""
 
     status_code_reasons = {
@@ -64,7 +64,7 @@ def make_response(status_code: int, body: str = "") -> bytes:
         404: "Not Found",
     }
 
-    response = f"HTTP/1.0 {status_code} {status_code_reasons[status_code]}\r\nContent-Type: text/html\r\n\r\n{body}"
+    response = f"HTTP/1.0 {status_code} {status_code_reasons[status_code]}\r\nContent-Type: text/html\r\n\r\n{body}\r\n"
 
     return response.encode()
 
@@ -106,13 +106,13 @@ def run_server(port: int) -> None:
                     if file_exists(file_requested):
                         if is_html_file(file_requested):
                             with open(file_requested, "r") as file:
-                                response = make_response(200, file.read())
+                                response = make_http_response(200, file.read())
                         else:
-                            response = make_response(403)
+                            response = make_http_response(403)
                     else:
-                        response = make_response(404)
+                        response = make_http_response(404)
                 except ValueError as e:
-                    response = make_response(400, str(e))
+                    response = make_http_response(400, str(e))
                     print_err(e)
 
                 conn.sendall(response)
