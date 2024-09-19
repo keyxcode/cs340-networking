@@ -3,6 +3,7 @@ import sys
 from socket_utils import receive_all
 from utils import print_err, print_br
 from http_server1 import make_response
+from typing import List
 
 # Implement a dynamic server that handles product calculation via HTTP requests
 #
@@ -19,6 +20,38 @@ from http_server1 import make_response
 #     - [] Any parameter is not a valid number (e.g., "GET /product?a=blah")
 # [] Treat query parameters as floating point numbers
 # [] Handle floating point overflow: return "inf" or "-inf" as strings in the JSON response
+
+
+def get_path(request: bytes) -> str:
+    """Extract the operands from HTTP GET query params."""
+
+    headers = request.decode()
+    print_err(f"Request Headers:\n{headers}")
+    print_br()
+
+    headers_lines = headers.splitlines()
+    if not headers_lines:
+        raise ValueError("Invalid request: No headers found")
+
+    request_line = headers_lines[0]  # always first line of the headers
+    request_components = request_line.split()
+    if len(request_components) < 3 or request_components[0] != "GET":
+        raise ValueError("Invalid request method or format")
+
+    path = request_line.split()[1]  # e.g. GET /index.html HTTP/1.1
+
+    return path
+
+
+def get_operands(path: str) -> List[float]:
+    # if not path.startswith("product"):
+    #     raise ValueError("Invalid request method or format")
+
+    return [1]
+
+
+def compute_product(*a) -> int:
+    return 1
 
 
 def run_server(port: int) -> None:
@@ -44,9 +77,11 @@ def run_server(port: int) -> None:
             with conn:
                 request = receive_all(conn)
 
-                # parse request
                 try:
-                    response = make_response(200)
+                    path = get_path(request)
+                    operands = get_operands(path)
+                    product = compute_product(operands)
+                    response = make_response(200, str(product))
                 except ValueError as e:
                     response = make_response(400, str(e))
                     print_err(e)
