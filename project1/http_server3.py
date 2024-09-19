@@ -1,6 +1,6 @@
 from socket import socket, AF_INET, SOCK_STREAM
 import sys
-from math import prod
+from math import prod, isinf
 import json
 from socket_utils import receive_all
 from utils import print_err, print_br
@@ -15,7 +15,7 @@ from typing import List
 #     - [x] No parameters are provided for "/product"
 #     - [x] Any parameter is not a valid number (e.g., "GET /product?a=blah")
 # [x] Treat query parameters as floating point numbers
-# [] Handle floating point overflow: return "inf" or "-inf" as strings in the JSON response
+# [x] Handle floating point overflow: return "inf" or "-inf" as strings in the JSON response
 # [x] Use Python's built-in json library to generate the response in JSON format
 # [x] Ensure the response body includes:
 #     - [x] "operation": "product"
@@ -74,10 +74,14 @@ def get_operands(path: str) -> List[float]:
 
 
 def make_json_response(operands: List[int]) -> int:
+    product = prod(operands)
+    if isinf(product):
+        product = str(product)
+
     response_body = {
         "operation": "product",
         "operands": operands,
-        "result": prod(operands),
+        "result": product,
     }
     response_json = json.dumps(response_body)
 
