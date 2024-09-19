@@ -21,7 +21,7 @@ from typing import List
 #     - [x] "operation": "product"
 #     - [x] "operands": a list of the numbers provided in the query parameters
 #     - [x] "result": the product of the operands
-# [] Set "Content-Type: application/json" for the response
+# [x] Set "Content-Type: application/json" for the response
 
 
 class NotFoundError(Exception):
@@ -111,7 +111,7 @@ def run_server(port: int) -> None:
                     path = get_path(request)
                     operands = get_operands(path)
                     json_body = make_json_response(operands)
-                    response = make_http_response(200, json_body)
+                    response = make_http_response(200, json_body, "application/json")
                 except NotFoundError as e:
                     response = make_http_response(404, str(e))
                     print_err(e)

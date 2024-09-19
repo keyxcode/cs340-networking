@@ -54,8 +54,12 @@ def is_html_file(filename: str) -> bool:
     return filename.rsplit(".", 1)[-1].lower() in ("html", "htm")
 
 
-def make_http_response(status_code: int, body: str = "") -> bytes:
-    """Generate an HTTP response with the given status code and optional file content."""
+def make_http_response(
+    status_code: int,
+    body: str = "",
+    content_type: str = "text/html",
+) -> bytes:
+    """Generate an HTTP response with the given status code, optional content type and optional file content."""
 
     status_code_reasons = {
         200: "OK",
@@ -64,7 +68,7 @@ def make_http_response(status_code: int, body: str = "") -> bytes:
         404: "Not Found",
     }
 
-    response = f"HTTP/1.0 {status_code} {status_code_reasons[status_code]}\r\nContent-Type: text/html\r\n\r\n{body}\r\n"
+    response = f"HTTP/1.0 {status_code} {status_code_reasons[status_code]}\r\nContent-Type: {content_type}\r\n\r\n{body}\r\n"
 
     return response.encode()
 
