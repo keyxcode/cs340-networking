@@ -22,6 +22,10 @@ from typing import List
 # [] Handle floating point overflow: return "inf" or "-inf" as strings in the JSON response
 
 
+class NotFoundError(Exception):
+    pass
+
+
 def get_path(request: bytes) -> str:
     """Extract the operands from HTTP GET query params."""
 
@@ -44,14 +48,30 @@ def get_path(request: bytes) -> str:
 
 
 def get_operands(path: str) -> List[float]:
-    # if not path.startswith("product"):
-    #     raise ValueError("Invalid request method or format")
+    if not path.startswith("/product"):
+        raise NotFoundError(f"Requested URL {path} does not start with '/product'")
 
-    return [1]
+    # split between product and the query params e.g. /product?a=1&b=2
+    path_components = path.split("?")
+    if len(path_components) < 2:
+        raise ValueError(f"Missing query parameters in the request {path}")
+
+    query_params = path_components[1].split("&")
+    if len(query_params) < 1:
+        raise ValueError(f"No operands provided in the query {path}")
+
+    res = list()
+    for param in query_params:
+        try:
+            res.append(float(param.split("=")[1]))
+        except ValueError:
+            raise ValueError(f"Invalid operand value: '{param}' is not a number")
+
+    return res
 
 
 def compute_product(*a) -> int:
-    return 1
+    print(a)
 
 
 def run_server(port: int) -> None:
@@ -82,13 +102,16 @@ def run_server(port: int) -> None:
                     operands = get_operands(path)
                     product = compute_product(operands)
                     response = make_response(200, str(product))
-                except ValueError as e:
+                except NotFoundError as e:
+                    response = make_response(404, str(e))
+                    print_err(e)
+                except (ValueError, Exception) as e:
                     response = make_response(400, str(e))
                     print_err(e)
-
-                conn.sendall(response)
-                print_err(f"Response:\n{response.decode()}")
-                print_br()
+                finally:
+                    conn.sendall(response)
+                    print_err(f"Response:\n{response.decode()}")
+                    print_br()
 
 
 def main():
