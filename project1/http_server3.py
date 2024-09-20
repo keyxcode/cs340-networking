@@ -50,6 +50,8 @@ def get_path(request: bytes) -> str:
 
 
 def get_operands(path: str) -> List[float]:
+    """Extract and return operands from the query parameters."""
+
     if not path.startswith("/product"):
         raise NotFoundError(f"Requested URL {path} does not start with '/product'")
 
@@ -74,9 +76,14 @@ def get_operands(path: str) -> List[float]:
 
 
 def make_json_response(operands: List[int]) -> int:
+    """Create a JSON response for the product of operands."""
+
     product = prod(operands)
+
+    # format infinity values to "inf" or "-inf"
     if isinf(product):
         product = str(product)
+    operands = [str(operand) if isinf(operand) else operand for operand in operands]
 
     response_body = {
         "operation": "product",
