@@ -29,7 +29,7 @@ class NotFoundError(Exception):
 
 
 def get_path(request: bytes) -> str:
-    """Extract the operands from HTTP GET query params."""
+    "Extract the path from the HTTP GET request."
 
     headers = request.decode()
     print_err(f"Request Headers:\n{headers}")
@@ -96,7 +96,7 @@ def make_json_response(operands: List[int]) -> int:
 
 
 def run_server(port: int) -> None:
-    """Start the HTTP server and handle a single incoming connection at a time."""
+    """Start the HTTP server on the given port and handle a single incoming connection at a time."""
 
     HOST = "localhost"
     BACKLOG_SIZE = 10
