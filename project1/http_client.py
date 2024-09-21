@@ -58,7 +58,7 @@ def parse_url(url: str) -> Tuple[str, int, str]:
     # note that host can either be a domain name or an IP address
     if ":" in host_port:
         host, port = host_port.split(":", 1)
-    else:
+    else:  # set default port to 80 http if not specified
         host, port = host_port, 80
 
     return host, int(port), path
