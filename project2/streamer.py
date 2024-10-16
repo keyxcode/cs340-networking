@@ -6,7 +6,10 @@ from lossy_socket import LossyUDP
 # do not import anything else from socket except INADDR_ANY
 from socket import INADDR_ANY
 
+import struct
+
 CHUNK_SIZE = 1024
+HEADER_FORMAT = "<I"  # little eldian 4-byte unsigned int
 
 
 class Streamer:
@@ -20,10 +23,14 @@ class Streamer:
 
     def send(self, data_bytes: bytes) -> None:
         """Note that data_bytes can be larger than one packet."""
+        seq_num = 0
+
         for i in range(0, len(data_bytes), CHUNK_SIZE):
-            self.socket.sendto(
-                data_bytes[i : i + CHUNK_SIZE], (self.dst_ip, self.dst_port)
-            )
+            # use struct to ensure the header created with seq_num always stays in HEADER_FORMAT
+            header = struct.pack(HEADER_FORMAT, seq_num)
+            full_packet = header + data_bytes[i : i + CHUNK_SIZE]
+            self.socket.sendto(full_packet, (self.dst_ip, self.dst_port))
+            seq_num += 1
 
     def recv(self) -> bytes:
         """Blocks (waits) if no data is ready to be read from the connection."""
