@@ -7,6 +7,9 @@ from lossy_socket import LossyUDP
 from socket import INADDR_ANY
 
 import struct
+from concurrent.futures import ThreadPoolExecutor
+from threading import Lock
+from time import sleep
 
 CHUNK_SIZE = 1024
 HEADER_FORMAT = "<I"  # little eldian 4-byte unsigned int
@@ -24,7 +27,13 @@ class Streamer:
         self.send_seq_num = 0
 
         self.recv_buffer = dict()
+        self.recv_buffer_lock = Lock()
         self.expected_seq_num = 0
+
+        self.closed = False
+        # start the listener function in a background thread
+        self.executor = ThreadPoolExecutor(max_workers=1)
+        self.executor.submit(self.listener)
 
     def send(self, data_bytes: bytes) -> None:
         """Note that data_bytes can be larger than one packet."""
@@ -40,21 +49,33 @@ class Streamer:
         """Blocks (waits) until the expected sequence number is received.
         Handles out-of-order packet reception using a receive buffer.
         Returns the data corresponding to the expected sequence number."""
-        while self.expected_seq_num not in self.recv_buffer:
-            packet, addr = self.socket.recvfrom()
-            header_size = struct.calcsize(HEADER_FORMAT)
-            header = packet[:header_size]
-            data = packet[header_size:][:]
-            seq_num = struct.unpack(HEADER_FORMAT, header)[0]
-            self.recv_buffer[seq_num] = data
+        while True:
+            if self.expected_seq_num in self.recv_buffer:
+                with self.recv_buffer_lock:
+                    res = self.recv_buffer.pop(self.expected_seq_num)
+                    self.expected_seq_num += 1
+                    return res
 
-        res = self.recv_buffer[self.expected_seq_num]
-        del self.recv_buffer[self.expected_seq_num]
-        self.expected_seq_num += 1
-        return res
+            sleep(0.01)
 
     def close(self) -> None:
         """Cleans up. It should block (wait) until the Streamer is done with all
         the necessary ACKs and retransmissions"""
         # your code goes here, especially after you add ACKs and retransmissions.
-        pass
+        self.closed = True
+        self.socket.stoprecv()
+
+    def listener(self) -> None:
+        while not self.closed:
+            try:
+                packet, addr = self.socket.recvfrom()
+                header_size = struct.calcsize(HEADER_FORMAT)
+                header = packet[:header_size]
+                data = packet[header_size:][:]
+                seq_num = struct.unpack(HEADER_FORMAT, header)[0]
+                with self.recv_buffer_lock:
+                    self.recv_buffer[seq_num] = data
+            except Exception as e:
+                print("listener died!", e)
+
+        self.executor.shutdown()
