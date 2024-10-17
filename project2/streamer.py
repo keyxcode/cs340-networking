@@ -13,6 +13,7 @@ from time import sleep
 
 CHUNK_SIZE = 1024
 HEADER_FORMAT = "<I"  # little eldian 4-byte unsigned int
+HEADER_SIZE = struct.calcsize(HEADER_FORMAT)
 
 
 class Streamer:
@@ -69,13 +70,17 @@ class Streamer:
         while not self.closed:
             try:
                 packet, addr = self.socket.recvfrom()
-                header_size = struct.calcsize(HEADER_FORMAT)
-                header = packet[:header_size]
-                data = packet[header_size:][:]
-                seq_num = struct.unpack(HEADER_FORMAT, header)[0]
+                seq_num, data = self._unpack_packet(packet)
                 with self.recv_buffer_lock:
                     self.recv_buffer[seq_num] = data
             except Exception as e:
                 print("listener died!", e)
 
         self.executor.shutdown()
+
+    def _unpack_packet(self, packet: bytes) -> tuple[int, bytes]:
+        header = packet[:HEADER_SIZE]
+        data = packet[HEADER_SIZE:][:]
+        seq_num = struct.unpack(HEADER_FORMAT, header)[0]
+
+        return seq_num, data
