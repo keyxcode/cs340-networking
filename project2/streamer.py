@@ -10,9 +10,14 @@ import struct
 from concurrent.futures import ThreadPoolExecutor
 from threading import Lock
 from time import sleep
+from typing import Optional
 
 CHUNK_SIZE = 1024
-HEADER_FORMAT = "<I"  # little eldian 4-byte unsigned int
+
+# HEADER_FORMAT: big eldian
+# 4-byte unsigned int data
+# 1 byte bool ACK flag
+HEADER_FORMAT = ">I?"
 HEADER_SIZE = struct.calcsize(HEADER_FORMAT)
 
 
@@ -36,15 +41,23 @@ class Streamer:
         self.executor = ThreadPoolExecutor(max_workers=1)
         self.executor.submit(self.listener)
 
+        self.ack = False
+        self.ack_lock = Lock()
+
     def send(self, data_bytes: bytes) -> None:
         """Note that data_bytes can be larger than one packet."""
 
         for i in range(0, len(data_bytes), CHUNK_SIZE):
-            # use struct to ensure the header created with seq_num always stays in HEADER_FORMAT
-            header = struct.pack(HEADER_FORMAT, self.send_seq_num)
-            full_packet = header + data_bytes[i : i + CHUNK_SIZE]
-            self.socket.sendto(full_packet, (self.dst_ip, self.dst_port))
+            data = data_bytes[i : i + CHUNK_SIZE]
+            packet = self._build_packet(self.send_seq_num, False, data)
+            self.socket.sendto(packet, (self.dst_ip, self.dst_port))
             self.send_seq_num += 1
+
+        while not self.ack:
+            sleep(0.01)
+
+        with self.ack_lock:
+            self.ack = False
 
     def recv(self) -> bytes:
         """Blocks (waits) until the expected sequence number is received.
@@ -70,17 +83,32 @@ class Streamer:
         while not self.closed:
             try:
                 packet, addr = self.socket.recvfrom()
-                seq_num, data = self._unpack_packet(packet)
-                with self.recv_buffer_lock:
-                    self.recv_buffer[seq_num] = data
+                seq_num, is_ack, data = self._unpack_packet(packet)
+                if is_ack:  # received ack packet
+                    with self.ack_lock:
+                        self.ack = True
+                else:  # received data packet
+                    with self.recv_buffer_lock:
+                        self.recv_buffer[seq_num] = data
+                    # send ack
+                    packet = self._build_packet(seq_num, True)
+                    self.socket.sendto(packet, (self.dst_ip, self.dst_port))
             except Exception as e:
                 print("listener died!", e)
 
         self.executor.shutdown()
 
-    def _unpack_packet(self, packet: bytes) -> tuple[int, bytes]:
+    def _unpack_packet(self, packet: bytes) -> tuple[int, bool, bytes]:
         header = packet[:HEADER_SIZE]
         data = packet[HEADER_SIZE:][:]
-        seq_num = struct.unpack(HEADER_FORMAT, header)[0]
+        seq_num, is_ack = struct.unpack(HEADER_FORMAT, header)
 
-        return seq_num, data
+        return seq_num, is_ack, data
+
+    def _build_packet(
+        self, seq_num: int, is_ack: bool, data: Optional[bytes] = b""
+    ) -> bytes:
+        header = struct.pack(HEADER_FORMAT, seq_num, is_ack)
+        packet = header + data
+
+        return packet
