@@ -9,10 +9,11 @@ from socket import INADDR_ANY
 import struct
 from concurrent.futures import ThreadPoolExecutor
 from threading import Lock
-from time import sleep
+from time import sleep, time
 from typing import Optional
 
 CHUNK_SIZE = 1024
+ACK_TIMEOUT = 0.25  # seconds
 
 # HEADER_FORMAT: big eldian
 # 4-byte unsigned int data
@@ -52,9 +53,13 @@ class Streamer:
             packet = self._build_packet(self.send_seq_num, False, data)
             self.socket.sendto(packet, (self.dst_ip, self.dst_port))
 
-            # wait for ack
-            while not self.ack_num != self.send_seq_num:
-                sleep(0.01)
+            # wait for ack for ACK_TIME secs
+            start_time = time()
+            while self.ack_num != self.send_seq_num:
+                if time() - start_time > ACK_TIMEOUT:  # resend packet
+                    self.socket.sendto(packet, (self.dst_ip, self.dst_port))
+                    start_time = time()
+                sleep(0.01)  # reduce busy waiting
 
             self.send_seq_num += 1
 
