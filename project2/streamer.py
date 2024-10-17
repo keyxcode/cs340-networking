@@ -41,8 +41,8 @@ class Streamer:
         self.executor = ThreadPoolExecutor(max_workers=1)
         self.executor.submit(self.listener)
 
-        self.ack = False
-        self.ack_lock = Lock()
+        # simple mechanism to check for ack
+        self.ack_num = -1
 
     def send(self, data_bytes: bytes) -> None:
         """Note that data_bytes can be larger than one packet."""
@@ -51,13 +51,12 @@ class Streamer:
             data = data_bytes[i : i + CHUNK_SIZE]
             packet = self._build_packet(self.send_seq_num, False, data)
             self.socket.sendto(packet, (self.dst_ip, self.dst_port))
+
+            # wait for ack
+            while not self.ack_num != self.send_seq_num:
+                sleep(0.01)
+
             self.send_seq_num += 1
-
-        while not self.ack:
-            sleep(0.01)
-
-        with self.ack_lock:
-            self.ack = False
 
     def recv(self) -> bytes:
         """Blocks (waits) until the expected sequence number is received.
@@ -85,8 +84,7 @@ class Streamer:
                 packet, addr = self.socket.recvfrom()
                 seq_num, is_ack, data = self._unpack_packet(packet)
                 if is_ack:  # received ack packet
-                    with self.ack_lock:
-                        self.ack = True
+                    self.ack_num = seq_num
                 else:  # received data packet
                     with self.recv_buffer_lock:
                         self.recv_buffer[seq_num] = data
