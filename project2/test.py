@@ -7,7 +7,7 @@ import lossy_socket
 NUMS = 1000
 
 
-def receive(s):
+def receive(s: Streamer):
     expected = 0
     str_buf = ""
     while expected < NUMS:
@@ -75,7 +75,7 @@ def host2(listen_port, remote_port):
 def main():
     lossy_socket.sim = lossy_socket.SimulationParams(
         loss_rate=0.1,
-        corruption_rate=0.0,
+        corruption_rate=0.1,
         max_delivery_delay=0.1,
         become_reliable_after=100000.0,
     )
