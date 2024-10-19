@@ -10,10 +10,10 @@ import struct
 from concurrent.futures import ThreadPoolExecutor
 from threading import Lock
 from time import sleep, time
-from typing import Optional
+from typing import Optional, Callable
 
 CHUNK_SIZE = 1024
-ACK_TIMEOUT = 0.25  # seconds
+ACK_TIMEOUT = 0.25  # secs
 
 # HEADER_FORMAT: big eldian
 # 4-byte unsigned int data
@@ -59,13 +59,7 @@ class Streamer:
             self.socket.sendto(packet, self.dest)
 
             # wait for ack for ACK_TIME secs
-            start_time = time()
-            while self.ack_num != self.send_seq_num:
-                if time() - start_time > ACK_TIMEOUT:  # resend packet
-                    self.socket.sendto(packet, self.dest)
-                    start_time = time()
-                sleep(0.01)  # reduce busy waiting
-
+            self._retransmit_until(packet, lambda: self.ack_num == self.send_seq_num)
             self.send_seq_num += 1
 
     def recv(self) -> bytes:
@@ -92,18 +86,21 @@ class Streamer:
         print("Sending FIN")
 
         # resend ack until having received fin ack
-        start_time = time()
-        while not self.fin_acked:
-            if time() - start_time > ACK_TIMEOUT:
-                self.socket.sendto(fin_packet, self.dest)
-                start_time = time()
-            sleep(0.01)  # reduce busy waiting
+        self._retransmit_until(fin_packet, lambda: self.fin_acked)
         print("Received FIN-ACK")
 
         sleep(2)  # wait for 2 secs according to the assignment requirements
 
         self.closed = True  # as a side effect will stop the packet listener
         self.socket.stoprecv()
+
+    def _retransmit_until(self, packet: bytes, condition: Callable[[], bool]) -> None:
+        start_time = time()
+        while not condition():
+            if time() - start_time > ACK_TIMEOUT:
+                self.socket.sendto(packet, self.dest)
+                start_time = time()
+            sleep(0.01)  # reduce busy waiting
 
     def _listener(self) -> None:
         while not self.closed:
