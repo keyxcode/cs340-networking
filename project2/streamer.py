@@ -30,6 +30,7 @@ class Streamer:
         self.socket.bind((src_ip, src_port))
         self.dst_ip = dst_ip
         self.dst_port = dst_port
+        self.dest = (self.dst_ip, self.dst_port)
 
         # seq num of the next packet to be sent
         self.send_seq_num = 0
@@ -47,7 +48,7 @@ class Streamer:
         # should match the send_seq_num for a send action to be considered complete
         self.ack_num = -1
 
-        self.fin_received = False
+        self.fin_acked = False
 
     def send(self, data_bytes: bytes) -> None:
         """Note that data_bytes can be larger than one packet."""
@@ -55,13 +56,13 @@ class Streamer:
         for i in range(0, len(data_bytes), CHUNK_SIZE):
             data = data_bytes[i : i + CHUNK_SIZE]
             packet = self._build_packet(self.send_seq_num, False, False, data)
-            self.socket.sendto(packet, (self.dst_ip, self.dst_port))
+            self.socket.sendto(packet, self.dest)
 
             # wait for ack for ACK_TIME secs
             start_time = time()
             while self.ack_num != self.send_seq_num:
                 if time() - start_time > ACK_TIMEOUT:  # resend packet
-                    self.socket.sendto(packet, (self.dst_ip, self.dst_port))
+                    self.socket.sendto(packet, self.dest)
                     start_time = time()
                 sleep(0.01)  # reduce busy waiting
 
@@ -85,7 +86,21 @@ class Streamer:
         the necessary ACKs and retransmissions"""
         # when doing stop and wait, when we call close() we're guaranteed to have received all the ACKs
         # but in the future when doing other implementations, we may have to check for this
-        # fin_packet = self._build_packet(self.expected_seq_num, True, True)
+
+        fin_packet = self._build_packet(self.expected_seq_num, False, True)
+        self.socket.sendto(fin_packet, self.dest)
+        print("Sending FIN")
+
+        # resend ack until having received fin ack
+        start_time = time()
+        while not self.fin_acked:
+            if time() - start_time > ACK_TIMEOUT:
+                self.socket.sendto(fin_packet, self.dest)
+                start_time = time()
+            sleep(0.01)  # reduce busy waiting
+        print("Received FIN-ACK")
+
+        sleep(2)  # wait for 2 secs according to the assignment requirements
 
         self.closed = True  # as a side effect will stop the packet listener
         self.socket.stoprecv()
@@ -95,14 +110,20 @@ class Streamer:
             try:
                 ack_packet, addr = self.socket.recvfrom()
                 seq_num, is_ack, is_fin, data = self._unpack_packet(ack_packet)
-                if is_ack:  # received ack packet
+                if is_ack and is_fin:  # fin-ack
+                    self.fin_acked = True
+                elif is_ack:  # is data ack
                     self.ack_num = seq_num
-                else:  # received data packet
+                elif is_fin:  # fin
+                    fin_ack_packet = self._build_packet(self.send_seq_num, True, True)
+                    self.socket.sendto(fin_ack_packet, self.dest)
+                    print("Received FIN, sending FIN-ACK")
+                else:  # data
                     with self.recv_buffer_lock:
                         self.recv_buffer[seq_num] = data
                     # send ack for the packet just received
                     ack_packet = self._build_packet(seq_num, True, False)
-                    self.socket.sendto(ack_packet, (self.dst_ip, self.dst_port))
+                    self.socket.sendto(ack_packet, self.dest)
             except Exception as e:
                 print("listener died!", e)
 
