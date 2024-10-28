@@ -8,10 +8,11 @@ from socket import INADDR_ANY
 
 import struct
 from concurrent.futures import ThreadPoolExecutor
-from threading import Lock
+from threading import Lock, Timer
 from time import sleep, time
 from hashlib import md5
 from typing import Optional, Callable
+from collections import deque
 
 CHUNK_SIZE = 1024
 ACK_TIMEOUT = 0.25  # secs
@@ -38,45 +39,59 @@ class Streamer:
         self.dst_port = dst_port
         self.dest = (self.dst_ip, self.dst_port)
 
-        # seq num of the next packet to be sent
-        self.send_seq_num = 0
-
-        self.recv_buffer = dict()
-        self.recv_buffer_lock = Lock()
-        self.expected_seq_num = 0
-
         self.closed = False
-        # start the listener function in a background thread
+        # start the receiver listener function in a background thread
         self.executor = ThreadPoolExecutor(max_workers=1)
         self.executor.submit(self._listener)
 
-        # a var storing the seq num of the latest ack package
-        # should match the send_seq_num for a send action to be considered complete
-        self.ack_num = -1
-
         self.fin_acked = False
+
+        # we've received ack up to this number - 1
+        # when resending packets, we start from this number
+        self.acked_up_to = 0
+
+        self.send_buffer = deque()  # data will go here first, then to send_queue
+        self.send_buffer_lock = Lock()
+        self.send_queue = dict()  # data will be sent from here
+        self.send_queue_lock = Lock()
+        self.send_seq_num = 0  # seq num of the next packet to be sent
+        self._send_from_send_queue()
+        self.send_thread = ThreadPoolExecutor(max_workers=1)
+        self.send_thread.submit(self._send_from_send_queue)
+
+        self.recv_buffer = dict()
+        self.recv_buffer_lock = Lock()
+        self.expected_recv_seq_num = 0
 
     def send(self, data_bytes: bytes) -> None:
         """Note that data_bytes can be larger than one packet."""
-
         for i in range(0, len(data_bytes), CHUNK_SIZE):
             data = data_bytes[i : i + CHUNK_SIZE]
             packet = self._build_packet(self.send_seq_num, False, False, data)
-            self.socket.sendto(packet, self.dest)
 
-            # wait for ack for ACK_TIME secs
-            self._retransmit_until(packet, lambda: self.ack_num == self.send_seq_num)
-            self.send_seq_num += 1
+            with self.send_buffer_lock:
+                self.send_buffer.append(packet)
+                self.send_seq_num += 1
+
+    def _send_from_send_queue(self) -> None:
+        while not self.closed:
+            # remove packets in send queue that have seq num less than ack up to seq num
+
+            # if we dont have enough packets in send queue now, add more from send buffer
+
+            # send all packets
+
+            # timeout
+            sleep(0.01)
 
     def recv(self) -> bytes:
         """Blocks (waits) until the expected sequence number is received.
         Handles out-of-order packet reception using a receive buffer.
         Returns the data corresponding to the expected sequence number."""
         while True:
-            if self.expected_seq_num in self.recv_buffer:
+            if self.expected_recv_seq_num in self.recv_buffer:
                 with self.recv_buffer_lock:
-                    res = self.recv_buffer.pop(self.expected_seq_num)
-                    self.expected_seq_num += 1
+                    res = self.recv_buffer.pop(self.expected_recv_seq_num)
                     return res
 
             sleep(0.01)
@@ -86,8 +101,11 @@ class Streamer:
         the necessary ACKs and retransmissions"""
         # when doing stop and wait, when we call close() we're guaranteed to have received all the ACKs
         # but in the future when doing other implementations, we may have to check for this
+        # print("CLOSINGGGG", self.acked_up_to, self.send_seq_num)
+        while self.acked_up_to < self.send_seq_num - 1:
+            sleep(0.1)
 
-        fin_packet = self._build_packet(self.expected_seq_num, False, True)
+        fin_packet = self._build_packet(self.expected_recv_seq_num, False, True)
         self.socket.sendto(fin_packet, self.dest)
         print("Sending FIN")
 
@@ -121,16 +139,23 @@ class Streamer:
                     self.fin_acked = True
                     print("Received FIN-ACK")
                 elif is_ack:  # is data ack
-                    self.ack_num = seq_num
+                    if seq_num > self.acked_up_to:
+                        self.acked_up_to = seq_num
+                    # print(f"sucessfully sent up to {self.acked_up_to}")
                 elif is_fin:  # fin
                     fin_ack = self._build_packet(self.send_seq_num, True, True)
                     self.socket.sendto(fin_ack, self.dest)
                     print("Received FIN, sending FIN-ACK")
                 else:  # data packet
-                    with self.recv_buffer_lock:
-                        self.recv_buffer[seq_num] = data
-                    # send ack for the packet just received
-                    ack = self._build_packet(seq_num, True, False)
+                    if seq_num not in self.recv_buffer:
+                        with self.recv_buffer_lock:
+                            self.recv_buffer[seq_num] = data
+                        # self.expected_recv_seq_num += 1
+                    # print(f"expect {self.expected_recv_seq_num} next")
+                    if seq_num == self.expected_recv_seq_num:
+                        # have received up to expected_recv_seq_num
+                        self.expected_recv_seq_num += 1
+                    ack = self._build_packet(self.expected_recv_seq_num, True, False)
                     self.socket.sendto(ack, self.dest)
             except Exception as e:
                 print("listener died!", e)
