@@ -8,11 +8,12 @@ from socket import INADDR_ANY
 
 import struct
 from concurrent.futures import ThreadPoolExecutor
-from threading import Lock, Timer
+from threading import Lock
 from time import sleep, time
 from hashlib import md5
 from typing import Optional, Callable
 from collections import deque
+from bisect import bisect_left
 
 CHUNK_SIZE = 1024
 ACK_TIMEOUT = 0.25  # secs
@@ -52,10 +53,9 @@ class Streamer:
 
         self.send_buffer = deque()  # data will go here first, then to send_queue
         self.send_buffer_lock = Lock()
-        self.send_queue = dict()  # data will be sent from here
+        self.send_queue = list()  # data will be sent from here
         self.send_queue_lock = Lock()
         self.send_seq_num = 0  # seq num of the next packet to be sent
-        self._send_from_send_queue()
         self.send_thread = ThreadPoolExecutor(max_workers=1)
         self.send_thread.submit(self._send_from_send_queue)
 
@@ -68,18 +68,28 @@ class Streamer:
         for i in range(0, len(data_bytes), CHUNK_SIZE):
             data = data_bytes[i : i + CHUNK_SIZE]
             packet = self._build_packet(self.send_seq_num, False, False, data)
-
             with self.send_buffer_lock:
-                self.send_buffer.append(packet)
+                self.send_buffer.append((self.send_seq_num, packet))
                 self.send_seq_num += 1
 
     def _send_from_send_queue(self) -> None:
         while not self.closed:
-            # remove packets in send queue that have seq num less than ack up to seq num
+            # find the idx of the first element in the send queue that has seq num <= ack num
+            acked_idx = bisect_left(
+                self.send_queue, self.acked_up_to, key=lambda x: x[0]
+            )
+            with self.send_queue_lock and self.send_buffer_lock:
+                # remove packets in send queue that have seq num less than ack up to seq num
+                self.send_queue = self.send_queue[acked_idx:]
 
-            # if we dont have enough packets in send queue now, add more from send buffer
+                # if we dont have enough packets in send queue now, add more from send buffer
+                while len(self.send_queue) < 20 and self.send_buffer:
+                    self.send_queue.append(self.send_buffer.popleft())
+                # print([e[0] for e in self.send_queue])
 
             # send all packets
+            for _, packet in self.send_queue:
+                self.socket.sendto(packet, self.dest)
 
             # timeout
             sleep(0.01)
@@ -141,7 +151,7 @@ class Streamer:
                 elif is_ack:  # is data ack
                     if seq_num > self.acked_up_to:
                         self.acked_up_to = seq_num
-                    # print(f"sucessfully sent up to {self.acked_up_to}")
+                    print(f"sucessfully sent up to {self.acked_up_to - 1}")
                 elif is_fin:  # fin
                     fin_ack = self._build_packet(self.send_seq_num, True, True)
                     self.socket.sendto(fin_ack, self.dest)
@@ -151,7 +161,7 @@ class Streamer:
                         with self.recv_buffer_lock:
                             self.recv_buffer[seq_num] = data
                         # self.expected_recv_seq_num += 1
-                    # print(f"expect {self.expected_recv_seq_num} next")
+                    print(f"expect {self.expected_recv_seq_num} next")
                     if seq_num == self.expected_recv_seq_num:
                         # have received up to expected_recv_seq_num
                         self.expected_recv_seq_num += 1
