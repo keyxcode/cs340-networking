@@ -16,7 +16,7 @@ from collections import deque
 from bisect import bisect_left
 
 CHUNK_SIZE = 1024
-ACK_TIMEOUT = 0.01  # secs
+ACK_TIMEOUT = 0.1  # secs
 WINDOW_SIZE = 20
 
 # HEADER_NO_HASH_FORMAT: big eldian
@@ -72,7 +72,7 @@ class Streamer:
 
         # start the sender and receiver listener function in background threads
         self.send_thread = ThreadPoolExecutor(max_workers=1)
-        self.send_thread.submit(self._send_from_send_queue)
+        self.send_thread.submit(self._transmit)
         self.listen_thread = ThreadPoolExecutor(max_workers=1)
         self.listen_thread.submit(self._listener)
 
@@ -89,6 +89,8 @@ class Streamer:
             packet = self._build_packet(self.send_seq, False, False, chunk)
 
             with self.chunk_buffer_lock:
+                # storing the packet with the send_seq explicitly will help later in the transmit process
+                # when we need to do binary search
                 self.chunk_buffer.append((self.send_seq, packet))
                 self.send_seq += 1
 
@@ -113,9 +115,6 @@ class Streamer:
     def close(self) -> None:
         """Cleans up. It should block (wait) until the Streamer is done with all
         the necessary ACKs and retransmissions"""
-        # when doing stop and wait, when we call close() we're guaranteed to have received all the ACKs
-        # but in the future when doing other implementations, we may have to check for this
-        # print("CLOSINGGGG", self.acked_up_to, self.send_seq_num)
         while self.next_unacked_seq < self.send_seq - 1:
             sleep(0.01)
 
@@ -131,22 +130,31 @@ class Streamer:
         self.closed = True  # as a side effect will stop the packet listener
         self.socket.stoprecv()
 
-    def _send_from_send_queue(self) -> None:
+    def _transmit(self) -> None:
+        """
+        Transmits packets from the transmit queue continuously until the socket is closed.
+
+        Follows the Go-Back-N protocol to manage packet transmission.
+        Processes the transmit queue to resend all packets that have not yet been acknowledged.
+        If the queue has fewer packets than the defined window size, additional packets are added from the chunk buffer.
+        """
+
         while not self.closed:
-            # find the idx of the first element in the send queue that has seq num <= ack num
-            acked_idx = bisect_left(
+            # find the idx of the first element in the transmit queue that hasn't been acked
+            # aka the element that has seq num == next_unacked_seq
+            first_unacked_idx = bisect_left(
                 self.transmit_queue, self.next_unacked_seq, key=lambda x: x[0]
             )
-            with self.transmit_queue_lock and self.chunk_buffer_lock:
-                # remove packets in send queue that have seq num less than ack up to seq num
-                self.transmit_queue = self.transmit_queue[acked_idx:]
 
-                # if we dont have enough packets in send queue now, add more from send buffer
+            with self.transmit_queue_lock and self.chunk_buffer_lock:
+                # remove packets in the queue that came before the next unacked packet
+                self.transmit_queue = self.transmit_queue[first_unacked_idx:]
+
+                # if there're less packets in the queue than the window size, add more from send buffer
                 while len(self.transmit_queue) < WINDOW_SIZE and self.chunk_buffer:
                     self.transmit_queue.append(self.chunk_buffer.popleft())
-                # print([e[0] for e in self.send_queue])
 
-            # (re)send all packets
+            # transmit all packets in the queue
             for _, packet in self.transmit_queue:
                 self.socket.sendto(packet, self.dest)
 
