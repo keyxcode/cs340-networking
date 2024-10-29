@@ -137,6 +137,8 @@ class Streamer:
         Follows the Go-Back-N protocol to manage packet transmission.
         Processes the transmit queue to resend all packets that have not yet been acknowledged.
         If the queue has fewer packets than the defined window size, additional packets are added from the chunk buffer.
+
+        This method runs in a background thread.
         """
 
         while not self.closed:
@@ -164,34 +166,55 @@ class Streamer:
         self.send_thread.shutdown()
 
     def _listener(self) -> None:
+        """
+        Listens for incoming packets and processes them until the socket is closed.
+
+        Continuously receives packets from the socket and performs the following actions:
+        - Validates the hash of received packets.
+        - Processes ACKs, FINs, and data packets, updating internal state as necessary.
+        - Sends acknowledgments for received data and FIN packets.
+
+        This method runs in a background thread.
+        """
         while not self.closed:
             try:
                 packet, _ = self.socket.recvfrom()
+
+                # extract hash from the received packet for validation
                 expected_hash = packet[:HASH_SIZE]
                 packet_no_hash = packet[HASH_SIZE:]
                 if not self._is_valid_hash(packet_no_hash, expected_hash):
                     continue
 
                 seq_num, is_ack, is_fin, data = self._unpack_packet(packet_no_hash)
+
+                # check for the type of packet we received
                 if is_ack and is_fin:  # fin-ack
                     self.fin_acked = True
                     print("Received FIN-ACK")
-                elif is_ack:  # is data ack
+
+                elif is_ack:  # data ack
                     if seq_num >= self.next_unacked_seq:
                         self.next_unacked_seq = seq_num
-                    print(f"sucessfully sent up to {self.next_unacked_seq - 1}")
+                    print(f"Received ACK for up to packet {self.next_unacked_seq - 1}")
+
                 elif is_fin:  # fin
                     fin_ack = self._build_packet(self.send_seq, True, True)
                     self.socket.sendto(fin_ack, self.dest)
                     print("Received FIN, sending FIN-ACK")
+
                 else:  # data packet
+                    # a true Go-Back-N implementation would discard any out of order packets
+                    # meaning we'll have to use this condition: if seq_num == self.expected_seq
+                    # here we're storing the packets anyway to improve runtime at the cost of space
                     if seq_num not in self.received_packets:
                         with self.received_packets_lock:
                             self.received_packets[seq_num] = data
-                        # self.expected_recv_seq_num += 1
-                    # print(f"expect {self.expected_recv_seq_num} next")
                     ack = self._build_packet(self.expected_seq, True, False)
                     self.socket.sendto(ack, self.dest)
+                    print(
+                        f"Received packet with seq num {seq_num}, sending ACK for seq num {self.expected_seq}"
+                    )
             except Exception as e:
                 print("listener died!", e)
 
