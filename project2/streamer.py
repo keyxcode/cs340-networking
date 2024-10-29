@@ -52,19 +52,19 @@ class Streamer:
 
         # data submitted to recv() will go to send_buffer first
         # then moved to send_queue when it's ready to be sent over the network
-        self.send_buffer = deque()
-        self.send_buffer_lock = Lock()
-        self.send_queue = list()
-        self.send_queue_lock = Lock()
+        self.chunk_buffer = deque()
+        self.chunk_buffer_lock = Lock()
+        self.transmit_queue = list()
+        self.transmit_queue_lock = Lock()
         self.send_seq = 0  # seq num of the next packet to send
 
         # we've received ack for data packet up to this seq num - 1
         # when resending packets, start from this seq num
         self.next_unacked_seq = 0
 
-        # incoming data will be stored in the recv_buffer, even if not it didn't come in order
-        self.recv_buffer = dict()
-        self.recv_buffer_lock = Lock()
+        # incoming data will be stored in the received_packets, even if not it didn't come in order
+        self.received_packets = dict()
+        self.received_packets_lock = Lock()
         self.expected_seq = 0  # seq num of the next packet we expect to receive
 
         self.fin_acked = False  # socket has received an an ack for the fin it's sent
@@ -77,12 +77,19 @@ class Streamer:
         self.listen_thread.submit(self._listener)
 
     def send(self, data_bytes: bytes) -> None:
-        """Note that data_bytes can be larger than one packet."""
+        """
+        Chunks data into segments of CHUNK_SIZE and stores each with a unique sequence number in the chunk_buffer.
+
+        Args:
+            data_bytes: The data to be sent that may exceed one CHUNK_SIZE.
+        """
+
         for i in range(0, len(data_bytes), CHUNK_SIZE):
-            data = data_bytes[i : i + CHUNK_SIZE]
-            packet = self._build_packet(self.send_seq, False, False, data)
-            with self.send_buffer_lock:
-                self.send_buffer.append((self.send_seq, packet))
+            chunk = data_bytes[i : i + CHUNK_SIZE]
+            packet = self._build_packet(self.send_seq, False, False, chunk)
+
+            with self.chunk_buffer_lock:
+                self.chunk_buffer.append((self.send_seq, packet))
                 self.send_seq += 1
 
     def recv(self) -> bytes:
@@ -90,9 +97,9 @@ class Streamer:
         Handles out-of-order packet reception using a receive buffer.
         Returns the data corresponding to the expected sequence number."""
         while True:
-            if self.expected_seq in self.recv_buffer:
-                with self.recv_buffer_lock:
-                    res = self.recv_buffer.pop(self.expected_seq)
+            if self.expected_seq in self.received_packets:
+                with self.received_packets_lock:
+                    res = self.received_packets.pop(self.expected_seq)
                     self.expected_seq += 1
                     return res
 
@@ -123,19 +130,19 @@ class Streamer:
         while not self.closed:
             # find the idx of the first element in the send queue that has seq num <= ack num
             acked_idx = bisect_left(
-                self.send_queue, self.next_unacked_seq, key=lambda x: x[0]
+                self.transmit_queue, self.next_unacked_seq, key=lambda x: x[0]
             )
-            with self.send_queue_lock and self.send_buffer_lock:
+            with self.transmit_queue_lock and self.chunk_buffer_lock:
                 # remove packets in send queue that have seq num less than ack up to seq num
-                self.send_queue = self.send_queue[acked_idx:]
+                self.transmit_queue = self.transmit_queue[acked_idx:]
 
                 # if we dont have enough packets in send queue now, add more from send buffer
-                while len(self.send_queue) < WINDOW_SIZE and self.send_buffer:
-                    self.send_queue.append(self.send_buffer.popleft())
+                while len(self.transmit_queue) < WINDOW_SIZE and self.chunk_buffer:
+                    self.transmit_queue.append(self.chunk_buffer.popleft())
                 # print([e[0] for e in self.send_queue])
 
             # (re)send all packets
-            for _, packet in self.send_queue:
+            for _, packet in self.transmit_queue:
                 self.socket.sendto(packet, self.dest)
 
             # timeout
@@ -165,9 +172,9 @@ class Streamer:
                     self.socket.sendto(fin_ack, self.dest)
                     print("Received FIN, sending FIN-ACK")
                 else:  # data packet
-                    if seq_num not in self.recv_buffer:
-                        with self.recv_buffer_lock:
-                            self.recv_buffer[seq_num] = data
+                    if seq_num not in self.received_packets:
+                        with self.received_packets_lock:
+                            self.received_packets[seq_num] = data
                         # self.expected_recv_seq_num += 1
                     # print(f"expect {self.expected_recv_seq_num} next")
                     ack = self._build_packet(self.expected_seq, True, False)
