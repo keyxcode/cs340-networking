@@ -87,7 +87,7 @@ class Streamer:
                     self.send_queue.append(self.send_buffer.popleft())
                 # print([e[0] for e in self.send_queue])
 
-            # send all packets
+            # (re)send all packets
             for _, packet in self.send_queue:
                 self.socket.sendto(packet, self.dest)
 
@@ -100,8 +100,10 @@ class Streamer:
         Returns the data corresponding to the expected sequence number."""
         while True:
             if self.expected_recv_seq_num in self.recv_buffer:
+                print("YAY")
                 with self.recv_buffer_lock:
                     res = self.recv_buffer.pop(self.expected_recv_seq_num)
+                    self.expected_recv_seq_num += 1
                     return res
 
             sleep(0.01)
@@ -113,7 +115,7 @@ class Streamer:
         # but in the future when doing other implementations, we may have to check for this
         # print("CLOSINGGGG", self.acked_up_to, self.send_seq_num)
         while self.acked_up_to < self.send_seq_num - 1:
-            sleep(0.1)
+            sleep(0.01)
 
         fin_packet = self._build_packet(self.expected_recv_seq_num, False, True)
         self.socket.sendto(fin_packet, self.dest)
@@ -161,10 +163,7 @@ class Streamer:
                         with self.recv_buffer_lock:
                             self.recv_buffer[seq_num] = data
                         # self.expected_recv_seq_num += 1
-                    print(f"expect {self.expected_recv_seq_num} next")
-                    if seq_num == self.expected_recv_seq_num:
-                        # have received up to expected_recv_seq_num
-                        self.expected_recv_seq_num += 1
+                    # print(f"expect {self.expected_recv_seq_num} next")
                     ack = self._build_packet(self.expected_recv_seq_num, True, False)
                     self.socket.sendto(ack, self.dest)
             except Exception as e:

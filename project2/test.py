@@ -4,7 +4,7 @@ from streamer import Streamer
 import sys
 import lossy_socket
 
-NUMS = 100
+NUMS = 1000
 
 
 def receive(s: Streamer):
