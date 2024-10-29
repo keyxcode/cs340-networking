@@ -93,17 +93,22 @@ class Streamer:
                 self.send_seq += 1
 
     def recv(self) -> bytes:
-        """Blocks (waits) until the expected sequence number is received.
-        Handles out-of-order packet reception using a receive buffer.
-        Returns the data corresponding to the expected sequence number."""
+        """
+        Blocks until the packet with the expected sequence number (expected_seq) is received.
+        Handles out-of-order packets by placing them in the received_packets buffer.
+        Data is returned in order, incrementally, as expected_seq is always incremented upon successful retrieval.
+
+        Returns:
+            bytes: The data corresponding to the expected sequence number.
+        """
         while True:
             if self.expected_seq in self.received_packets:
                 with self.received_packets_lock:
-                    res = self.received_packets.pop(self.expected_seq)
+                    packet_data = self.received_packets.pop(self.expected_seq)
                     self.expected_seq += 1
-                    return res
+                    return packet_data
 
-            sleep(0.01)
+            sleep(0.01)  # reduce busy waiting
 
     def close(self) -> None:
         """Cleans up. It should block (wait) until the Streamer is done with all
@@ -190,7 +195,7 @@ class Streamer:
             if time() - start_time > ACK_TIMEOUT:
                 self.socket.sendto(packet, self.dest)
                 start_time = time()
-            sleep(0.01)  # reduce busy waiting
+            sleep(0.01)
 
     def _unpack_packet(self, packet_no_hash: bytes) -> tuple[int, bool, bool, bytes]:
         header = packet_no_hash[:HEADER_NO_HASH_SIZE]
