@@ -44,7 +44,6 @@ class Streamer:
             src_ip: Source IP address. Defaults to INADDR_ANY (listen on all network interfaces).
             src_port: Source port. Defaults to 0.
         """
-
         self.socket = LossyUDP()
         self.socket.bind((src_ip, src_port))
         self.dst_ip = dst_ip
@@ -86,7 +85,6 @@ class Streamer:
         Args:
             data_bytes: The data to be sent that may exceed one CHUNK_SIZE.
         """
-
         for i in range(0, len(data_bytes), CHUNK_SIZE):
             chunk = data_bytes[i : i + CHUNK_SIZE]
             packet = self._build_packet(self.send_seq, False, False, chunk)
@@ -106,7 +104,6 @@ class Streamer:
         Returns:
             bytes: The data corresponding to the expected sequence number.
         """
-
         while True:
             if self.expected_seq in self.received_packets:
                 with self.received_packets_lock:
@@ -117,9 +114,14 @@ class Streamer:
             sleep(0.01)  # reduce busy waiting
 
     def close(self) -> None:
-        """Cleans up. It should block (wait) until the Streamer is done with all
-        the necessary ACKs and retransmissions"""
+        """
+        Blocks until all necessary ACKs are received, then initiates connection teardown:
+        - Waits until all sent packets are acknowledged.
+        - Sends a FIN packet and retransmits until a FIN-ACK is received.
+        - Pauses briefly for potential final retransmissions before marking the socket as closed.
 
+        Sets self.closed to terminate background processes.
+        """
         while self.last_acked_seq < self.send_seq - 1:
             sleep(0.01)
 
@@ -127,7 +129,7 @@ class Streamer:
         self.socket.sendto(fin_packet, self.dest)
         print("Sending FIN")
 
-        # resend ack until having received fin ack using stop and wait
+        # resend fin until having received fin ack using stop and wait
         self._retransmit_until(fin_packet, lambda: self.fin_acked)
 
         sleep(2)  # wait in case the other side socket needs this side to resend fin ack
