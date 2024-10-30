@@ -230,6 +230,13 @@ class Streamer:
         self.listen_thread.shutdown()
 
     def _retransmit_until(self, packet: bytes, should_stop: Callable[[], bool]) -> None:
+        """
+        Retransmits a packet at intervals defined by ACK_TIMEOUT until the stop condition is met.
+
+        Args:
+            packet: The packet to retransmit.
+            should_stop: A callable that returns True to stop retransmission.
+        """
         start_time = time()
         while not should_stop():
             if time() - start_time > ACK_TIMEOUT:
