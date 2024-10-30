@@ -186,7 +186,7 @@ class Streamer:
                 # extract hash from the received packet for validation
                 expected_hash = packet[:HASH_SIZE]
                 packet_no_hash = packet[HASH_SIZE:]
-                if not self._is_valid_hash(packet_no_hash, expected_hash):
+                if not self._verify_hash(packet_no_hash, expected_hash):
                     continue
 
                 seq_num, is_ack, is_fin, data = self._unpack_packet(packet_no_hash)
@@ -237,9 +237,18 @@ class Streamer:
                 start_time = time()
             sleep(0.01)
 
-    def _unpack_packet(self, packet_no_hash: bytes) -> tuple[int, bool, bool, bytes]:
-        header = packet_no_hash[:HEADER_NO_HASH_SIZE]
-        data = packet_no_hash[HEADER_NO_HASH_SIZE:][:]
+    def _unpack_packet(self, packet: bytes) -> tuple[int, bool, bool, bytes]:
+        """
+        Unpacks the header and data from a packet without its hash.
+
+        Args:
+            packet: The packet with header and data, excluding the hash.
+
+        Returns:
+            Tuple of sequence number, ACK flag, FIN flag, and data payload.
+        """
+        header = packet[:HEADER_NO_HASH_SIZE]
+        data = packet[HEADER_NO_HASH_SIZE:]
         seq_num, is_ack, is_fin = struct.unpack(HEADER_NO_HASH_FORMAT, header)
 
         return seq_num, is_ack, is_fin, data
@@ -247,17 +256,28 @@ class Streamer:
     def _build_packet(
         self, seq_num: int, is_ack: bool, is_fin: bool, data: Optional[bytes] = b""
     ) -> bytes:
-        header_without_hash = struct.pack(
-            HEADER_NO_HASH_FORMAT, seq_num, is_ack, is_fin
-        )
-        packet_without_hash = header_without_hash + data
-        digest = self._calculate_hash(packet_without_hash)
-        packet = digest + packet_without_hash
+        """
+        Constructs a packet with header, data, and hash for integrity verification.
 
-        return packet
+        Args:
+            seq_num: Sequence number for the packet.
+            is_ack: if this packet sends acknowledgement of receiving data.
+            is_fin: if this packet signals the end of transmission.
+            data: Optional data payload.
+
+        Returns:
+            The complete packet with a hash prepended to the header and data.
+        """
+        header_no_hash = struct.pack(HEADER_NO_HASH_FORMAT, seq_num, is_ack, is_fin)
+        packet_no_hash = header_no_hash + data
+        digest = self._calculate_hash(packet_no_hash)
+
+        return digest + packet_no_hash
 
     def _calculate_hash(self, data: bytes) -> bytes:
+        """Calculates MD5 hash of some bytes data."""
         return md5(data).digest()
 
-    def _is_valid_hash(self, data: bytes, expected_hash: bytes) -> bool:
+    def _verify_hash(self, data: bytes, expected_hash: bytes) -> bool:
+        """Verifies data integrity by comparing the calculated hash to the expected hash."""
         return self._calculate_hash(data) == expected_hash
