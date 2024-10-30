@@ -13,7 +13,7 @@ from time import sleep, time
 from hashlib import md5
 from typing import Optional, Callable
 from collections import deque
-from bisect import bisect_left
+from bisect import bisect_right
 
 CHUNK_SIZE = 1024
 ACK_TIMEOUT = 0.1  # secs
@@ -44,6 +44,7 @@ class Streamer:
             src_ip: Source IP address. Defaults to INADDR_ANY (listen on all network interfaces).
             src_port: Source port. Defaults to 0.
         """
+
         self.socket = LossyUDP()
         self.socket.bind((src_ip, src_port))
         self.dst_ip = dst_ip
@@ -58,14 +59,16 @@ class Streamer:
         self.transmit_queue_lock = Lock()
         self.send_seq = 0  # seq num of the next packet to send
 
-        # we've received ack for data packet up to this seq num - 1
-        # when resending packets, start from this seq num
-        self.next_unacked_seq = 0
+        # we've received ack for data packet up to this seq num
+        # when trying to resend packets, start from this seq num + 1, aka the first unacked seq num
+        self.last_acked_seq = -1  # init to -1 because we haven't received any ack
 
-        # incoming data will be stored in the received_packets, even if not it didn't come in order
+        # incoming data will be stored in the received_packets, even if it didn't come in order
         self.received_packets = dict()
         self.received_packets_lock = Lock()
         self.expected_seq = 0  # seq num of the next packet we expect to receive
+
+        # self.data_return_seq = 0
 
         self.fin_acked = False  # socket has received an an ack for the fin it's sent
         self.closed = False  # socket has been closed
@@ -103,6 +106,7 @@ class Streamer:
         Returns:
             bytes: The data corresponding to the expected sequence number.
         """
+
         while True:
             if self.expected_seq in self.received_packets:
                 with self.received_packets_lock:
@@ -115,67 +119,66 @@ class Streamer:
     def close(self) -> None:
         """Cleans up. It should block (wait) until the Streamer is done with all
         the necessary ACKs and retransmissions"""
-        while self.next_unacked_seq < self.send_seq - 1:
+
+        while self.last_acked_seq < self.send_seq - 1:
             sleep(0.01)
 
         fin_packet = self._build_packet(self.expected_seq, False, True)
         self.socket.sendto(fin_packet, self.dest)
         print("Sending FIN")
 
-        # resend ack until having received fin ack
+        # resend ack until having received fin ack using stop and wait
         self._retransmit_until(fin_packet, lambda: self.fin_acked)
 
-        sleep(2)  # wait for 2 secs according to the assignment requirements
+        sleep(2)  # wait in case the other side socket needs this side to resend fin ack
 
-        self.closed = True  # as a side effect will stop the packet listener
+        self.closed = True  # this will stop the transmit and listener background tasks as a side effect
         self.socket.stoprecv()
 
     def _transmit(self) -> None:
         """
-        Transmits packets from the transmit queue continuously until the socket is closed.
+        Transmits packets from the transmit queue continuously in a background thread until the socket is closed.
 
         Follows the Go-Back-N protocol to manage packet transmission.
         Processes the transmit queue to resend all packets that have not yet been acknowledged.
         If the queue has fewer packets than the defined window size, additional packets are added from the chunk buffer.
-
-        This method runs in a background thread.
         """
 
         while not self.closed:
             # find the idx of the first element in the transmit queue that hasn't been acked
-            # aka the element that has seq num == next_unacked_seq
-            first_unacked_idx = bisect_left(
-                self.transmit_queue, self.next_unacked_seq, key=lambda x: x[0]
+            # aka the element right after the one that has seq num == last_acked_seq
+            first_unacked_idx = bisect_right(
+                self.transmit_queue, self.last_acked_seq, key=lambda x: x[0]
             )
 
             with self.transmit_queue_lock and self.chunk_buffer_lock:
-                # remove packets in the queue that came before the next unacked packet
+                # remove packets that have been acked from the transmit queue
                 self.transmit_queue = self.transmit_queue[first_unacked_idx:]
 
                 # if there're less packets in the queue than the window size, add more from send buffer
                 while len(self.transmit_queue) < WINDOW_SIZE and self.chunk_buffer:
                     self.transmit_queue.append(self.chunk_buffer.popleft())
 
-            # transmit all packets in the queue
+            # transmit all packets in the transmit queue
             for _, packet in self.transmit_queue:
                 self.socket.sendto(packet, self.dest)
 
-            # timeout
+            # timeout, after which we'll check for newly acked packets and retransmit if needed
             sleep(ACK_TIMEOUT)
 
         self.send_thread.shutdown()
 
     def _listener(self) -> None:
         """
-        Listens for incoming packets and processes them until the socket is closed.
+        Listens for incoming packets in a background thread and processes them until the socket is closed.
 
         Continuously receives packets from the socket and performs the following actions:
-        - Validates the hash of received packets.
-        - Processes ACKs, FINs, and data packets, updating internal state as necessary.
-        - Sends acknowledgments for received data and FIN packets.
-
-        This method runs in a background thread.
+        - Validates the hash.
+        - Processes FIN-ACK, ACK, FIN, and data packets differently.
+        - Updates internal state as necessary.
+        - Sends acknowledgments for data and FIN packets.
         """
+
         while not self.closed:
             try:
                 packet, _ = self.socket.recvfrom()
@@ -188,15 +191,15 @@ class Streamer:
 
                 seq_num, is_ack, is_fin, data = self._unpack_packet(packet_no_hash)
 
-                # check for the type of packet we received
+                # process different types of packet differently
                 if is_ack and is_fin:  # fin-ack
                     self.fin_acked = True
                     print("Received FIN-ACK")
 
                 elif is_ack:  # data ack
-                    if seq_num >= self.next_unacked_seq:
-                        self.next_unacked_seq = seq_num
-                    print(f"Received ACK for up to packet {self.next_unacked_seq - 1}")
+                    if seq_num >= self.last_acked_seq:
+                        self.last_acked_seq = seq_num
+                    print(f"Received ACK for up to packet {self.last_acked_seq}")
 
                 elif is_fin:  # fin
                     fin_ack = self._build_packet(self.send_seq, True, True)
@@ -206,11 +209,17 @@ class Streamer:
                 else:  # data packet
                     # a true Go-Back-N implementation would discard any out of order packets
                     # meaning we'll have to use this condition: if seq_num == self.expected_seq
-                    # here we're storing the packets anyway to improve runtime at the cost of space
+                    # here we're storing the packets anyway if we haven't received it
+                    # => improve runtime at the cost of space
                     if seq_num not in self.received_packets:
                         with self.received_packets_lock:
                             self.received_packets[seq_num] = data
-                    ack = self._build_packet(self.expected_seq, True, False)
+                    # note that we don't necessarily ack the seq num we just received
+                    # instead we need to ack the last seq num of the consecutive seq of packets we've received starting from 0
+                    # this is updated as a side effect by recv() as it only returns consecutive packets
+                    # one drawback of doing it this way is that we have to wait until the next cycle of recv() for this value to be updated
+                    # even if the seq num we just received in fact resulted in a valid consecutive sequence
+                    ack = self._build_packet(self.expected_seq - 1, True, False)
                     self.socket.sendto(ack, self.dest)
                     print(
                         f"Received packet with seq num {seq_num}, sending ACK for seq num {self.expected_seq}"
