@@ -16,8 +16,9 @@ from collections import deque
 from bisect import bisect_right
 
 CHUNK_SIZE = 1024
-ACK_TIMEOUT = 0.1  # secs
-WINDOW_SIZE = 20
+WINDOW_SIZE = 8
+ACK_TIMEOUT = 0.2  # secs
+BUSY_WAIT_SLEEP = 0.01
 
 # HEADER_NO_HASH_FORMAT: big eldian
 # 4-byte unsigned int data
@@ -59,6 +60,7 @@ class Streamer:
         self.send_queue_lock = Lock()
         self.next_send_seq = 0
         self.max_acked_seq = -1  # sent data has been acked up to this seq num
+        self.next_return_seq = 0  # seq num of data to return to socket client
 
         # the following states are relevant when the socket is receiving data
         # incoming data will be stored in the received_packets, even if it didn't come in order
@@ -95,22 +97,20 @@ class Streamer:
 
     def recv(self) -> bytes:
         """
-        Blocks until the packet with the next in order sequence number (last_inorder_received_seq + 1) is available.
-        Increments last_inorder_received_seq upon successful retrieval.
+        Blocks until the packet with the next_return_seq is available.
+        Increments next_return_seq upon successful retrieval.
 
         Returns:
             bytes: The data corresponding to the expected sequence number.
         """
         while True:
-            if self.last_inorder_received_seq + 1 in self.received_packets:
-                if self.received_packets_lock:
-                    self.last_inorder_received_seq += 1
-                    packet_data = self.received_packets.pop(
-                        self.last_inorder_received_seq
-                    )
+            if self.next_return_seq in self.received_packets:
+                with self.received_packets_lock:
+                    packet_data = self.received_packets.pop(self.next_return_seq)
+                    self.next_return_seq += 1
                     return packet_data
 
-            sleep(0.01)  # reduce busy waiting
+            sleep(BUSY_WAIT_SLEEP)
 
     def close(self) -> None:
         """
@@ -122,7 +122,7 @@ class Streamer:
         Sets self.closed to terminate background processes.
         """
         while self.max_acked_seq != self.next_send_seq - 1:
-            sleep(0.01)
+            sleep(BUSY_WAIT_SLEEP)
 
         fin_packet = self._build_packet(self.last_inorder_received_seq, False, True)
         self.socket.sendto(fin_packet, self.dest)
@@ -207,25 +207,21 @@ class Streamer:
                     print("Received FIN, sending FIN-ACK")
 
                 else:  # data packet
-                    # a true Go-Back-N implementation would discard any out of order packets
-                    # meaning we'll have to use this condition: if seq_num == self.expected_seq
-                    # here we're storing the packets anyway if we haven't received it
-                    # => improve runtime at the cost of space
-                    if seq_num not in self.received_packets:
+                    if seq_num == self.last_inorder_received_seq + 1:
                         with self.received_packets_lock:
                             self.received_packets[seq_num] = data
-                    # note that we don't necessarily ack the seq num we just received
-                    # instead we need to ack the last seq num of the consecutive seq of packets starting from packet 0
-                    # this is updated as a side effect by recv() as it only returns consecutive packets
-                    # one drawback of doing it this way is that we have to wait until the next cycle of recv() for this value to be updated
-                    # even if the seq num we just received in fact resulted in a valid consecutive sequence
+                        self.last_inorder_received_seq = seq_num
+                        print(
+                            f"Received packet {seq_num}, sending ACK for packet {self.last_inorder_received_seq}"
+                        )
+                    else:
+                        print(
+                            f"Discarded out of order packet {seq_num}, sending ACK for packet {self.last_inorder_received_seq}"
+                        )
                     ack = self._build_packet(
                         self.last_inorder_received_seq, True, False
                     )
                     self.socket.sendto(ack, self.dest)
-                    print(
-                        f"Received packet with seq num {seq_num}, sending ACK for seq num {self.last_inorder_received_seq}"
-                    )
             except Exception as e:
                 print("listener died!", e)
 
@@ -244,7 +240,7 @@ class Streamer:
             if time() - start_time > ACK_TIMEOUT:
                 self.socket.sendto(packet, self.dest)
                 start_time = time()
-            sleep(0.01)
+            sleep(BUSY_WAIT_SLEEP)
 
     def _unpack_packet(self, packet: bytes) -> tuple[int, bool, bool, bytes]:
         """
