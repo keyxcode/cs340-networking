@@ -14,9 +14,9 @@ from hashlib import md5
 from typing import Optional, Callable
 
 CHUNK_SIZE = 1024
-WINDOW_SIZE = 8
+WINDOW_SIZE = 10
 ACK_TIMEOUT = 0.2  # secs
-BUSY_WAIT_SLEEP = 0.01
+BUSY_WAIT_SLEEP = 0.1
 
 # HEADER_NO_HASH_FORMAT: big eldian
 # 4-byte unsigned int data
@@ -74,7 +74,7 @@ class Streamer:
 
     def send(self, data_bytes: bytes) -> None:
         """
-        Chunks data into segments of CHUNK_SIZE and stores each with a unique sequence number in the send_queue.
+        Chunks data into segments of CHUNK_SIZE and adds to the end of send_queue.
 
         Args:
             data_bytes: The data to be sent that may exceed one CHUNK_SIZE.
@@ -94,13 +94,18 @@ class Streamer:
 
         Returns:
             bytes: The data corresponding to the expected sequence number.
+            The returned data may include multiple packets concatenated together.
         """
         while True:
-            if self.next_return_seq in self.received_packets:
+            data = bytearray()
+
+            while self.next_return_seq in self.received_packets:
                 with self.received_packets_lock:
-                    packet_data = self.received_packets.pop(self.next_return_seq)
+                    data.extend(self.received_packets.pop(self.next_return_seq))
                     self.next_return_seq += 1
-                    return packet_data
+
+            if data:
+                return bytes(data)
 
             sleep(BUSY_WAIT_SLEEP)
 
@@ -130,12 +135,11 @@ class Streamer:
 
     def _transmit(self) -> None:
         """
-        Transmits packets from the transmit queue continuously in a background thread until the socket is closed.
+        Transmits packets from the send_queue continuously in a background thread until the socket is closed.
 
         Follows the Go-Back-N protocol to manage packet transmission.
         Resend all packets that have not yet been acknowledged in the current window.
         """
-
         while not self.closed:
             self.send_base = self.max_acked_seq + 1
 
@@ -161,7 +165,6 @@ class Streamer:
         - Updates internal state as necessary.
         - Sends acknowledgments for data and FIN packets.
         """
-
         while not self.closed:
             try:
                 packet, _ = self.socket.recvfrom()
@@ -189,6 +192,7 @@ class Streamer:
                     print("Received FIN, sending FIN-ACK")
 
                 else:  # data packet
+                    # only accept in order packet
                     if seq_num == self.last_inorder_received_seq + 1:
                         with self.received_packets_lock:
                             self.received_packets[seq_num] = data
@@ -205,12 +209,15 @@ class Streamer:
                     )
                     self.socket.sendto(ack, self.dest)
             except Exception as e:
-                print("listener died!", e)
+                print("Listener died!", e)
 
         self.listen_thread.shutdown()
 
     def _retransmit_until(
-        self, packet: bytes, should_stop: Callable[[], bool], timeout: int = ACK_TIMEOUT
+        self,
+        packet: bytes,
+        should_stop: Callable[[], bool],
+        timeout: int = BUSY_WAIT_SLEEP,
     ) -> None:
         """
         Retransmits a packet at intervals defined by ACK_TIMEOUT until the stop condition is met.
