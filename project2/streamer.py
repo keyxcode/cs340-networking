@@ -12,6 +12,7 @@ from threading import Lock
 from time import sleep, time
 from hashlib import md5
 from typing import Optional, Callable
+from datetime import datetime
 
 CHUNK_SIZE = 1024
 WINDOW_SIZE = 10
@@ -119,23 +120,23 @@ class Streamer:
         Sets self.closed to terminate background processes.
         """
         while self.send_base != len(self.send_queue):
-            print(
-                f"SOCKET: Can't close. Only received ACK up to {self.send_base - 1} / {len(self.send_queue) - 1}"
+            self._log(
+                f"SOCK: Can't close. Only received ACK up to {self.send_base - 1} / {len(self.send_queue) - 1}"
             )
             sleep(BUSY_WAIT_SLEEP)
 
-        print("SOCKET: Initiating connectinon teardown")
+        self._log("SOCK: Initiating connectinon teardown")
 
         fin_packet = self._build_packet(0, False, True)
         self.socket.sendto(fin_packet, self.dest)
-        print("SOCK: Sending FIN")
+        self._log("SOCK: Sending FIN")
 
         # resend fin until having received fin ack using stop and wait
         self._retransmit_until(fin_packet, lambda: self.fin_acked)
-        print("SOCK: Received FIN-ACK")
+        self._log("SOCK: Received FIN-ACK")
 
         sleep(2)  # wait in case the other side socket needs this side to resend fin ack
-        print("SOCKET: Closing...")
+        self._log("SOCK: Closing...")
         self.closed = True  # this will stop the transmit and listener background tasks as a side effect
         self.socket.stoprecv()
 
@@ -146,7 +147,7 @@ class Streamer:
         Follows the Go-Back-N protocol to manage packet transmission.
         Resend all packets that have not yet been acknowledged in the current window.
         """
-        print("SOCKET: Started transmit thread")
+        self._log("SOCK: Started transmit thread")
 
         while not self.closed:
             self.send_base = self.max_acked_seq + 1
@@ -157,7 +158,7 @@ class Streamer:
                 packet_i = self.send_base + i
                 if packet_i < send_queue_len:
                     self.socket.sendto(self.send_queue[packet_i], self.dest)
-                    print(f"SOCKET: Sending packet {packet_i}")
+                    self._log(f"SOCK: Sending packet {packet_i}")
 
             # timeout, after which we'll check for newly acked packets and retransmit if needed
             sleep(ACK_TIMEOUT)
@@ -174,7 +175,7 @@ class Streamer:
         - Updates internal state as necessary.
         - Sends acknowledgments for data and FIN packets.
         """
-        print("SOCKET: Started listener thread")
+        self._log("SOCK: Started listener thread")
 
         while not self.closed:
             try:
@@ -191,18 +192,18 @@ class Streamer:
                 # process different types of packet differently
                 if is_ack and is_fin:  # fin-ack
                     self.fin_acked = True
-                    print("SOCK: Received FIN-ACK")
+                    self._log("SOCK: Received FIN-ACK")
 
                 elif is_ack:  # data ack
                     self.max_acked_seq = max(self.max_acked_seq, seq_num)
-                    print(
+                    self._log(
                         f"SOCK: Received ACK for up to packet {self.max_acked_seq} / {len(self.send_queue) - 1}"
                     )
 
                 elif is_fin:  # fin
                     fin_ack = self._build_packet(0, True, True)
                     self.socket.sendto(fin_ack, self.dest)
-                    print("SOCK: Received FIN. Sending FIN-ACK")
+                    self._log("SOCK: Received FIN. Sending FIN-ACK")
 
                 else:  # data packet
                     # only accept in order packet
@@ -210,19 +211,19 @@ class Streamer:
                         with self.received_packets_lock:
                             self.received_packets[seq_num] = data
                         self.last_inorder_received_seq = seq_num
-                        print(
-                            f"SOCK: Received packet {seq_num}. Sending ACK for packet {self.last_inorder_received_seq}"
-                        )
+                        self._log(f"SOCK: Received packet {seq_num}")
                     else:
-                        print(
-                            f"SOCK: Discarded out of order packet {seq_num}. Sending ACK for packet {self.last_inorder_received_seq}"
-                        )
+                        self._log(f"SOCK: Discarded out of order packet {seq_num}")
+
+                    self._log(
+                        f"SOCK: Sending ACK for packet {self.last_inorder_received_seq}"
+                    )
                     ack = self._build_packet(
                         self.last_inorder_received_seq, True, False
                     )
                     self.socket.sendto(ack, self.dest)
             except Exception as e:
-                print("SOCK: Listener died!", e)
+                self._log("SOCK: Listener died!", e)
 
         self.listen_thread.shutdown()
 
@@ -230,10 +231,10 @@ class Streamer:
         self,
         packet: bytes,
         should_stop: Callable[[], bool],
-        timeout: int = BUSY_WAIT_SLEEP,
+        timeout: int = ACK_TIMEOUT,
     ) -> None:
         """
-        Retransmits a packet at intervals defined by ACK_TIMEOUT until the stop condition is met.
+        Retransmits a packet until the stop condition is met.
 
         Args:
             packet: Packet to retransmit.
@@ -242,6 +243,7 @@ class Streamer:
         """
         start_time = time()
         while not should_stop():
+            self._log("SOCK: Resending...")
             if time() - start_time > ACK_TIMEOUT:
                 self.socket.sendto(packet, self.dest)
                 start_time = time()
@@ -270,7 +272,7 @@ class Streamer:
         Constructs a packet with header, data, and hash for integrity verification.
 
         Args:
-            seq_num: Sequence number for the packet.
+            seq_num: Non negative sequence number for the packet.
             is_ack: If this packet sends acknowledgement of receiving data.
             is_fin: If this packet signals the end of transmission.
             data: Optional data payload.
@@ -278,11 +280,14 @@ class Streamer:
         Returns:
             The complete packet with a hash prepended to the header and data.
         """
-        header_no_hash = struct.pack(HEADER_NO_HASH_FORMAT, seq_num, is_ack, is_fin)
-        packet_no_hash = header_no_hash + data
-        digest = self._calculate_hash(packet_no_hash)
+        try:
+            header_no_hash = struct.pack(HEADER_NO_HASH_FORMAT, seq_num, is_ack, is_fin)
+            packet_no_hash = header_no_hash + data
+            digest = self._calculate_hash(packet_no_hash)
 
-        return digest + packet_no_hash
+            return digest + packet_no_hash
+        except Exception as e:
+            raise RuntimeError(f"Failed to build packet: {e}")
 
     def _calculate_hash(self, data: bytes) -> bytes:
         """Calculates MD5 hash of some bytes data."""
@@ -291,3 +296,6 @@ class Streamer:
     def _verify_hash(self, data: bytes, expected_hash: bytes) -> bool:
         """Verifies data integrity by comparing the calculated hash to the expected hash."""
         return self._calculate_hash(data) == expected_hash
+
+    def _log(self, *args) -> None:
+        print(datetime.now().strftime("[%M:%S:%f]"), *args)
