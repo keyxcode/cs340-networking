@@ -12,8 +12,6 @@ from threading import Lock
 from time import sleep, time
 from hashlib import md5
 from typing import Optional, Callable
-from collections import deque
-from bisect import bisect_right
 
 CHUNK_SIZE = 1024
 WINDOW_SIZE = 8
@@ -51,22 +49,18 @@ class Streamer:
         self.dst_port = dst_port
         self.dest = (self.dst_ip, self.dst_port)
 
-        # the following states are relevant when the socket is transmitting data
-        # data submitted to recv() will first go to send_buffer
-        self.chunk_buffer = deque()
-        self.chunk_buffer_lock = Lock()
-        # then moved to send_queue when it's ready to be sent over the network
+        # the following states are relevant when the socket is sending data
         self.send_queue = list()
         self.send_queue_lock = Lock()
-        self.next_send_seq = 0
+        self.send_base = 0
         self.max_acked_seq = -1  # sent data has been acked up to this seq num
-        self.next_return_seq = 0  # seq num of data to return to socket client
+        self.next_send_seq = 0  # used to create packet seq num when add to send queue
 
         # the following states are relevant when the socket is receiving data
-        # incoming data will be stored in the received_packets, even if it didn't come in order
         self.received_packets = dict()
         self.received_packets_lock = Lock()
         self.last_inorder_received_seq = -1
+        self.next_return_seq = 0  # seq num of data to return to socket client
 
         # the following states are relevant to closing the socket
         self.fin_acked = False  # socket has received an an ack for the fin it's sent
@@ -80,7 +74,7 @@ class Streamer:
 
     def send(self, data_bytes: bytes) -> None:
         """
-        Chunks data into segments of CHUNK_SIZE and stores each with a unique sequence number in the chunk_buffer.
+        Chunks data into segments of CHUNK_SIZE and stores each with a unique sequence number in the send_queue.
 
         Args:
             data_bytes: The data to be sent that may exceed one CHUNK_SIZE.
@@ -89,10 +83,8 @@ class Streamer:
             chunk = data_bytes[i : i + CHUNK_SIZE]
             packet = self._build_packet(self.next_send_seq, False, False, chunk)
 
-            with self.chunk_buffer_lock:
-                # storing the packet with the send_seq explicitly will help later in the transmit process
-                # when we need to do binary search
-                self.chunk_buffer.append((self.next_send_seq, packet))
+            with self.send_queue_lock:
+                self.send_queue.append(packet)
                 self.next_send_seq += 1
 
     def recv(self) -> bytes:
@@ -121,10 +113,10 @@ class Streamer:
 
         Sets self.closed to terminate background processes.
         """
-        while self.max_acked_seq != self.next_send_seq - 1:
+        while self.send_base != len(self.send_queue):
             sleep(BUSY_WAIT_SLEEP)
 
-        fin_packet = self._build_packet(self.last_inorder_received_seq, False, True)
+        fin_packet = self._build_packet(0, False, True)
         self.socket.sendto(fin_packet, self.dest)
         print("Sending FIN")
 
@@ -141,28 +133,18 @@ class Streamer:
         Transmits packets from the transmit queue continuously in a background thread until the socket is closed.
 
         Follows the Go-Back-N protocol to manage packet transmission.
-        Processes the transmit queue to resend all packets that have not yet been acknowledged.
-        If the queue has fewer packets than the defined window size, additional packets are added from the chunk buffer.
+        Resend all packets that have not yet been acknowledged in the current window.
         """
 
         while not self.closed:
-            # find the idx of the first element in the transmit queue that hasn't been acked
-            # aka the element right after the one that has seq num == max_acked_seq
-            first_unacked_idx = bisect_right(
-                self.send_queue, self.max_acked_seq, key=lambda x: x[0]
-            )
+            self.send_base = self.max_acked_seq + 1
 
-            with self.send_queue_lock and self.chunk_buffer_lock:
-                # remove packets that have been acked from the transmit queue
-                self.send_queue = self.send_queue[first_unacked_idx:]
-
-                # if there're less packets in the queue than the window size, add more from send buffer
-                while len(self.send_queue) < WINDOW_SIZE and self.chunk_buffer:
-                    self.send_queue.append(self.chunk_buffer.popleft())
-
-            # transmit all packets in the transmit queue
-            for _, packet in self.send_queue:
-                self.socket.sendto(packet, self.dest)
+            # transmit all packets in the window
+            send_queue_len = len(self.send_queue)
+            for i in range(WINDOW_SIZE):
+                packet_i = self.send_base + i
+                if packet_i < send_queue_len:
+                    self.socket.sendto(self.send_queue[packet_i], self.dest)
 
             # timeout, after which we'll check for newly acked packets and retransmit if needed
             sleep(ACK_TIMEOUT)
@@ -202,7 +184,7 @@ class Streamer:
                     print(f"Received ACK for up to packet {self.max_acked_seq}")
 
                 elif is_fin:  # fin
-                    fin_ack = self._build_packet(self.next_send_seq, True, True)
+                    fin_ack = self._build_packet(0, True, True)
                     self.socket.sendto(fin_ack, self.dest)
                     print("Received FIN, sending FIN-ACK")
 
@@ -227,27 +209,30 @@ class Streamer:
 
         self.listen_thread.shutdown()
 
-    def _retransmit_until(self, packet: bytes, should_stop: Callable[[], bool]) -> None:
+    def _retransmit_until(
+        self, packet: bytes, should_stop: Callable[[], bool], timeout: int = ACK_TIMEOUT
+    ) -> None:
         """
         Retransmits a packet at intervals defined by ACK_TIMEOUT until the stop condition is met.
 
         Args:
-            packet: The packet to retransmit.
-            should_stop: A callable that returns True to stop retransmission.
+            packet: Packet to retransmit.
+            should_stop: Callable that returns True to stop retransmission.
+            timeout: Interval (in seconds) between retransmissions.
         """
         start_time = time()
         while not should_stop():
             if time() - start_time > ACK_TIMEOUT:
                 self.socket.sendto(packet, self.dest)
                 start_time = time()
-            sleep(BUSY_WAIT_SLEEP)
+            sleep(timeout)
 
     def _unpack_packet(self, packet: bytes) -> tuple[int, bool, bool, bytes]:
         """
         Unpacks the header and data from a packet without its hash.
 
         Args:
-            packet: The packet with header and data, excluding the hash.
+            packet: Packet with header and data, excluding the hash.
 
         Returns:
             Tuple of sequence number, ACK flag, FIN flag, and data payload.
@@ -266,8 +251,8 @@ class Streamer:
 
         Args:
             seq_num: Sequence number for the packet.
-            is_ack: if this packet sends acknowledgement of receiving data.
-            is_fin: if this packet signals the end of transmission.
+            is_ack: If this packet sends acknowledgement of receiving data.
+            is_fin: If this packet signals the end of transmission.
             data: Optional data payload.
 
         Returns:
