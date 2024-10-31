@@ -119,17 +119,23 @@ class Streamer:
         Sets self.closed to terminate background processes.
         """
         while self.send_base != len(self.send_queue):
+            print(
+                f"SOCKET: Can't close. Only received ACK up to {self.send_base - 1} / {len(self.send_queue) - 1}"
+            )
             sleep(BUSY_WAIT_SLEEP)
+
+        print("SOCKET: Initiating connectinon teardown")
 
         fin_packet = self._build_packet(0, False, True)
         self.socket.sendto(fin_packet, self.dest)
-        print("Sending FIN")
+        print("SOCK: Sending FIN")
 
         # resend fin until having received fin ack using stop and wait
         self._retransmit_until(fin_packet, lambda: self.fin_acked)
+        print("SOCK: Received FIN-ACK")
 
         sleep(2)  # wait in case the other side socket needs this side to resend fin ack
-
+        print("SOCKET: Closing...")
         self.closed = True  # this will stop the transmit and listener background tasks as a side effect
         self.socket.stoprecv()
 
@@ -140,6 +146,8 @@ class Streamer:
         Follows the Go-Back-N protocol to manage packet transmission.
         Resend all packets that have not yet been acknowledged in the current window.
         """
+        print("SOCKET: Started transmit thread")
+
         while not self.closed:
             self.send_base = self.max_acked_seq + 1
 
@@ -149,6 +157,7 @@ class Streamer:
                 packet_i = self.send_base + i
                 if packet_i < send_queue_len:
                     self.socket.sendto(self.send_queue[packet_i], self.dest)
+                    print(f"SOCKET: Sending packet {packet_i}")
 
             # timeout, after which we'll check for newly acked packets and retransmit if needed
             sleep(ACK_TIMEOUT)
@@ -165,6 +174,8 @@ class Streamer:
         - Updates internal state as necessary.
         - Sends acknowledgments for data and FIN packets.
         """
+        print("SOCKET: Started listener thread")
+
         while not self.closed:
             try:
                 packet, _ = self.socket.recvfrom()
@@ -180,16 +191,18 @@ class Streamer:
                 # process different types of packet differently
                 if is_ack and is_fin:  # fin-ack
                     self.fin_acked = True
-                    print("Received FIN-ACK")
+                    print("SOCK: Received FIN-ACK")
 
                 elif is_ack:  # data ack
                     self.max_acked_seq = max(self.max_acked_seq, seq_num)
-                    print(f"Received ACK for up to packet {self.max_acked_seq}")
+                    print(
+                        f"SOCK: Received ACK for up to packet {self.max_acked_seq} / {len(self.send_queue) - 1}"
+                    )
 
                 elif is_fin:  # fin
                     fin_ack = self._build_packet(0, True, True)
                     self.socket.sendto(fin_ack, self.dest)
-                    print("Received FIN, sending FIN-ACK")
+                    print("SOCK: Received FIN. Sending FIN-ACK")
 
                 else:  # data packet
                     # only accept in order packet
@@ -198,18 +211,18 @@ class Streamer:
                             self.received_packets[seq_num] = data
                         self.last_inorder_received_seq = seq_num
                         print(
-                            f"Received packet {seq_num}, sending ACK for packet {self.last_inorder_received_seq}"
+                            f"SOCK: Received packet {seq_num}. Sending ACK for packet {self.last_inorder_received_seq}"
                         )
                     else:
                         print(
-                            f"Discarded out of order packet {seq_num}, sending ACK for packet {self.last_inorder_received_seq}"
+                            f"SOCK: Discarded out of order packet {seq_num}. Sending ACK for packet {self.last_inorder_received_seq}"
                         )
                     ack = self._build_packet(
                         self.last_inorder_received_seq, True, False
                     )
                     self.socket.sendto(ack, self.dest)
             except Exception as e:
-                print("Listener died!", e)
+                print("SOCK: Listener died!", e)
 
         self.listen_thread.shutdown()
 

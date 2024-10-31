@@ -81,7 +81,7 @@ class LossyUDP(socket):
         sleep(0.01)
         if random.random() < sim.loss_rate and not sim.forced_reliable():
             # drop the packet
-            print("outgoing UDP packet was dropped by the simulator.")
+            print("SIM: outgoing UDP packet was dropped by the simulator.")
         else:
             if not sim.forced_reliable():
                 # flip an arbitrary number of bits in the packet:
@@ -98,11 +98,11 @@ class LossyUDP(socket):
                         msg_array[int(bit_to_flip / 8)] = flipped_byte
                         message = bytes(msg_array)
                         print(
-                            "outgoing UDP packet's bit number %d was flipped by the simulator."
+                            "SIM: outgoing UDP packet's bit number %d was flipped by the simulator."
                             % bit_to_flip
                         )
                 if bits_flipped > 0:
-                    print("total of %d bits flipped in the packet" % bits_flipped)
+                    print("SIM: total of %d bits flipped in the packet" % bits_flipped)
             # send message after a random delay.  The randomness will reorder packets
             Timer(
                 (

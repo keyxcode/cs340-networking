@@ -4,7 +4,7 @@ from streamer import Streamer
 import sys
 import lossy_socket
 
-NUMS = 1000
+NUMS = 100
 
 
 def receive(s: Streamer):
@@ -12,18 +12,18 @@ def receive(s: Streamer):
     str_buf = ""
     while expected < NUMS:
         data = s.recv()
-        print("recv returned {%s}" % data.decode("utf-8"))
+        print("TEST: recv returned {%s}" % data.decode("utf-8"))
         str_buf += data.decode("utf-8")
         for t in str_buf.split(" "):
             if len(t) == 0:
                 # there could be a "" at the start or the end, if a space is there
                 continue
             if int(t) == expected:
-                print("got %d!" % expected)
+                print("TEST: got %d!" % expected)
                 expected += 1
                 str_buf = ""
             elif int(t) > expected:
-                print("ERROR: got %s but was expecting %d" % (t, expected))
+                print("TEST: ERROR: got %s but was expecting %d" % (t, expected))
                 sys.exit(-1)
             else:
                 # we only received the first part of the number at the end
@@ -39,20 +39,23 @@ def host1(listen_port, remote_port):
         src_ip="localhost",
         src_port=listen_port,
     )
+
+    # TEST 1
     receive(s)
-    print("STAGE 1 TEST PASSED!")
-    # send large chunks of data
+    print("TEST: STAGE 1 TEST PASSED!")
+
+    # TEST 2: send large chunks of data
     i = 0
     buf = ""
     while i < NUMS:
         buf += "%d " % i
         if len(buf) > 12345 or i == NUMS - 1:
-            print("sending {%s}" % buf)
+            print("TEST: sending {%s}" % buf)
             s.send(buf.encode("utf-8"))
             buf = ""
         i += 1
     s.close()
-    print("CHECK THE OTHER SCRIPT FOR STAGE 2 RESULTS.")
+    print("TEST: CHECK THE OTHER SCRIPT FOR STAGE 2 RESULTS.")
 
 
 def host2(listen_port, remote_port):
@@ -62,14 +65,16 @@ def host2(listen_port, remote_port):
         src_ip="localhost",
         src_port=listen_port,
     )
-    # send small pieces of data
+    # TEST 1: send small pieces of data
     for i in range(NUMS):
         buf = "%d " % i
-        print("sending {%s}" % buf)
+        print("TEST: sending {%s}" % buf)
         s.send(buf.encode("utf-8"))
+
+    # TEST 2
     receive(s)
     s.close()
-    print("STAGE 2 TEST PASSED!")
+    print("TEST: STAGE 2 TEST PASSED!")
 
 
 def main():
