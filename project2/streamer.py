@@ -185,6 +185,7 @@ class Streamer:
                 expected_hash = packet[:HASH_SIZE]
                 packet_no_hash = packet[HASH_SIZE:]
                 if not self._verify_hash(packet_no_hash, expected_hash):
+                    self._log("SOCK: Discarded corrupted packet")
                     continue
 
                 seq_num, is_ack, is_fin, data = self._unpack_packet(packet_no_hash)
