@@ -149,19 +149,36 @@ class Streamer:
         """
         self._log("SOCK: Started transmit thread")
 
-        while not self.closed:
-            self.send_base = self.max_acked_seq + 1
+        next_send_seq = WINDOW_SIZE
+        temp_max_acked_seq = self.max_acked_seq
 
-            # transmit all packets in the window
+        while not self.closed:
+            # (re)transmit all packets in the window
             send_queue_len = len(self.send_queue)
             for i in range(WINDOW_SIZE):
                 packet_i = self.send_base + i
                 if packet_i < send_queue_len:
                     self.socket.sendto(self.send_queue[packet_i], self.dest)
-                    self._log(f"SOCK: Sending packet {packet_i}")
+                    self._log(f"SOCK: (Re)transmiting the entire window, {packet_i}")
 
-            # timeout, after which we'll check for newly acked packets and retransmit if needed
-            sleep(ACK_TIMEOUT)
+            # within timeout window, keep checking if the max acked seq has changed
+            start_time = time()
+            while time() < start_time + ACK_TIMEOUT:
+                if self.max_acked_seq > temp_max_acked_seq:
+                    # if it did, keep sending new packets and reset the timer
+                    diff = self.max_acked_seq - temp_max_acked_seq
+                    for i in range(next_send_seq, next_send_seq + diff):
+                        packet_i = self.next_send_seq + i
+                        if packet_i < send_queue_len:
+                            self.socket.sendto(self.send_queue[packet_i], self.dest)
+                            self._log(f"SOCK: Sending packet {packet_i}")
+
+                    self.send_base += diff
+                    next_send_seq += diff
+                    temp_max_acked_seq += diff
+                    start_time = time()
+
+                sleep(BUSY_WAIT_SLEEP)
 
         self.send_thread.shutdown()
 
@@ -244,10 +261,10 @@ class Streamer:
         """
         start_time = time()
         while not should_stop():
-            self._log("SOCK: Resending...")
             if time() - start_time > ACK_TIMEOUT:
                 self.socket.sendto(packet, self.dest)
                 start_time = time()
+                self._log("SOCK: Resending...")
             sleep(timeout)
 
     def _unpack_packet(self, packet: bytes) -> tuple[int, bool, bool, bytes]:
