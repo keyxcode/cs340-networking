@@ -144,13 +144,13 @@ class Streamer:
         """
         Transmits packets from the send_queue continuously in a background thread until the socket is closed.
 
-        Follows the Go-Back-N protocol to manage packet transmission.
-        Resend all packets that have not yet been acknowledged in the current window.
+        Sends packets within the current window and retransmits unacknowledged packets.
+        Monitors acknowledgments within a timeout period, advancing the window and sending new packets as acknowledgments are received.
         """
         self._log("SOCK: Started transmit thread")
 
         next_send_seq = WINDOW_SIZE
-        temp_max_acked_seq = self.max_acked_seq
+        local_max_acked_seq = self.max_acked_seq
 
         while not self.closed:
             # (re)transmit all packets in the window
@@ -164,9 +164,9 @@ class Streamer:
             # within timeout window, keep checking if the max acked seq has changed
             start_time = time()
             while time() < start_time + ACK_TIMEOUT:
-                if self.max_acked_seq > temp_max_acked_seq:
+                if self.max_acked_seq > local_max_acked_seq:
                     # if it did, keep sending new packets and reset the timer
-                    diff = self.max_acked_seq - temp_max_acked_seq
+                    diff = self.max_acked_seq - local_max_acked_seq
                     for i in range(next_send_seq, next_send_seq + diff):
                         packet_i = self.next_send_seq + i
                         if packet_i < send_queue_len:
@@ -175,7 +175,7 @@ class Streamer:
 
                     self.send_base += diff
                     next_send_seq += diff
-                    temp_max_acked_seq += diff
+                    local_max_acked_seq += diff
                     start_time = time()
 
                 sleep(BUSY_WAIT_SLEEP)
@@ -252,7 +252,7 @@ class Streamer:
         timeout: int = ACK_TIMEOUT,
     ) -> None:
         """
-        Retransmits a packet until the stop condition is met.
+        Retransmits a packet until the stop condition is met (stop and wait).
 
         Args:
             packet: Packet to retransmit.
